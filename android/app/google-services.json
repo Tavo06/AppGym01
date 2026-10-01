@@ -1,0 +1,55 @@
+{
+  "project_info": {
+    "project_number": "996263447499",
+    "project_id": "fitprogress-f232f",
+    "storage_bucket": "fitprogress-f232f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:996263447499:android:06af9603ab5419741d444e",
+        "android_client_info": {
+          "package_name": "com.fitprogress.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "996263447499-2ijd48jv5n5tnn0bkst5uovesqvi5olq.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.fitprogress.app",
+            "certificate_hash": "b9ca3bbe4432aed587eba55f8fd8cbf1900678ce"
+          }
+        },
+        {
+          "client_id": "996263447499-cl9nfgabgq7q3vbp4dbq06lv8ln9n44n.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.fitprogress.app",
+            "certificate_hash": "8e07c610446a805829bf62263468086d47fbeb62"
+          }
+        },
+        {
+          "client_id": "996263447499-6mgel4v0l9fnra39sbdrnl02hctgctlr.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDrv9PmHNODhChfpevwKitX5e1oQHA3fuE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "996263447499-6mgel4v0l9fnra39sbdrnl02hctgctlr.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
