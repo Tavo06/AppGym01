@@ -8,6 +8,7 @@ import 'core/theme/app_theme.dart';
 import 'firebase_options.dart';
 import 'providers/auth_provider.dart';
 import 'providers/progress_provider.dart';
+import 'providers/nutrition_provider.dart';
 import 'providers/schedule_provider.dart';
 import 'providers/session_cleanup.dart';
 import 'providers/theme_provider.dart';
@@ -35,6 +36,7 @@ class _FitProgressAppState extends State<FitProgressApp> {
   final WorkoutProvider _workoutProvider = WorkoutProvider();
   final ProgressProvider _progressProvider = ProgressProvider();
   final ScheduleProvider _scheduleProvider = ScheduleProvider();
+  final NutritionProvider _nutritionProvider = NutritionProvider();
   late final ThemeProvider _themeProvider = ThemeProvider(
     initialMode: widget.initialThemeMode,
   );
@@ -50,6 +52,7 @@ class _FitProgressAppState extends State<FitProgressApp> {
       workout: _workoutProvider,
       progress: _progressProvider,
       schedule: _scheduleProvider,
+      nutrition: _nutritionProvider,
     );
   }
 
@@ -60,6 +63,7 @@ class _FitProgressAppState extends State<FitProgressApp> {
     _workoutProvider.dispose();
     _progressProvider.dispose();
     _scheduleProvider.dispose();
+    _nutritionProvider.dispose();
     _themeProvider.dispose();
     super.dispose();
   }
@@ -72,6 +76,7 @@ class _FitProgressAppState extends State<FitProgressApp> {
         ChangeNotifierProvider.value(value: _workoutProvider),
         ChangeNotifierProvider.value(value: _progressProvider),
         ChangeNotifierProvider.value(value: _scheduleProvider),
+        ChangeNotifierProvider.value(value: _nutritionProvider),
         ChangeNotifierProvider.value(value: _themeProvider),
       ],
       child: Consumer<ThemeProvider>(

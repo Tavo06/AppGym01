@@ -9,7 +9,7 @@ Textos de interfaz y comentarios del código en **español**.
 ```bash
 flutter pub get
 flutter analyze          # debe quedar en "No issues found!"
-flutter test             # 110 pruebas; todas deben pasar
+flutter test             # 148 pruebas; todas deben pasar
 dart format lib test
 flutter run -d chrome    # o -d windows / dispositivo Android
 ```
@@ -55,6 +55,7 @@ core/ (constantes, rutas, tema, utilidades)
 | `WorkoutProvider` | Entrenamiento en curso: rutina, ejercicios, series por ejercicio (`Map<String, List<WorkoutSet>>`), guardado (`finishWorkout`). |
 | `ProgressProvider` | Historial, récords, progreso semanal, estadísticas, metas semanales (SharedPreferences por usuario). `agregarSesion()` actualiza todo y notifica. |
 | `ScheduleProvider` | Entrenamientos programados del calendario personal (`scheduled_workouts`). |
+| `NutritionProvider` | Alimentación: planes, plan activo (uno solo), comidas, alimentos, consumo diario y estadísticas. `ensureLoaded()` carga bajo demanda. |
 | `ThemeProvider` | Modo claro/oscuro/sistema (SharedPreferences). |
 
 - Estado local con `setState` (p. ej. `WorkoutScreen`: serie actual, reps en
@@ -78,21 +79,25 @@ lib/
 ├── models/                            exercise, routine, workout (sesión), workout_set,
 │                                      personal_record, progress (semana/estadísticas),
 │                                      goal (metas), user, routine_day (días y plan
-│                                      por ejercicio), scheduled_workout (calendario)
-├── providers/                         auth, workout, progress, schedule, theme,
-│                                      session_cleanup
-├── services/                          app_firebase, firestore_service, auth_service,
-│                                      google_auth_service
+│                                      por ejercicio), scheduled_workout (calendario),
+│                                      nutrition (plan, comida, alimento, consumo diario)
+├── providers/                         auth, workout, progress, schedule, nutrition,
+│                                      theme, session_cleanup
+├── services/                          app_firebase, firestore_service, nutrition_service,
+│                                      auth_service, google_auth_service
+│   (core/constants/nutrition_catalog.dart: alimentos comunes y 4 plantillas)
 ├── screens/
 │   ├── splash/  auth/ (login, verify_email, change_password + modales
 │   │            register_dialog, forgot_password_dialog)
 │   ├── main/main_shell.dart           barra inferior / NavigationRail
 │   ├── routines/ (lista + detalle + editor por días)   exercises/ (lista + crear/editar)
 │   ├── workout/ (entrenamiento + resumen)  progress/   calendar/   home/ (Panel)
+│   ├── nutrition/ (principal, plantillas, formulario de plan, detalle de plan)
 │   ├── profile/
 └── widgets/                           componentes reutilizables (ver abajo)
 test/                                  app_logic, firestore_logic, rubric_logic,
                                        personal_training (días, récords, calendario),
+                                       nutrition (modelos, plantillas, provider, UID),
                                        auth_widgets, screens_smoke (app completa con
                                        FakeFirebaseFirestore + MockFirebaseAuth), widget_test
 ```
@@ -102,10 +107,13 @@ test/                                  app_logic, firestore_logic, rubric_logic,
 `AppRouter` en `lib/core/routes/app_router.dart`; constantes en `AppRoutes`.
 
 - Inicial: `/splash` → `/login` o `/rutinas` (pantalla principal).
-- `StatefulShellRoute.indexedStack` (`MainShell`) con 6 ramas:
+- `StatefulShellRoute.indexedStack` (`MainShell`) con 7 ramas:
   `/rutinas` · `/entrenamiento` · `/ejercicio` · `/progreso` · `/calendario` ·
-  `/profile`. Móvil: `NavigationBar` (con < 420 px solo se rotula el destino
-  elegido); ancho ≥ 840: `NavigationRail`.
+  `/alimentacion` · `/profile`. Móvil: `NavigationBar` (con < 600 px solo se
+  rotula el destino elegido); ancho ≥ 840: `NavigationRail`.
+- Alimentación (pantalla completa): `/alimentacion/plantillas`,
+  `/alimentacion/plan/nuevo` (crear; editar con `extra: NutritionPlan`) y
+  `/alimentacion/plan/:id` (declarada después de `nuevo`).
 - Rutas a pantalla completa (`parentNavigatorKey: _rootKey`): `/home` (Panel),
   `/rutinas/crear`, `/rutinas/detalle` (devuelve con `pop` el `RoutineDay` a
   entrenar o `'edit'`), `/ejercicio/crear`, `/entrenamiento/resumen`,
@@ -154,6 +162,8 @@ Material 3, tipografía por defecto (sin `fontFamily`). Acceso: `context.palette
 | `WeeklyGoalsCard` | Metas semanales (`Consumer<ProgressProvider>`) |
 | `MonthCalendar`, `DayMarkers` | Calendario mensual (L–D) con indicadores por día |
 | `showExerciseHistorySheet` | Historial de un ejercicio |
+| `NutritionProgressPanel`, `MacroRing`, `MacroSummaryText`, `MacroColors` | Calorías y macros frente a objetivos |
+| `showFoodFormSheet`, `FoodRow` | Agregar/editar/registrar alimento (catálogo + manual); fila de alimento |
 | `MaxWidth`, `FormScrollView`, `Breakpoints` (`responsive.dart`) | Layout adaptativo |
 | `AppLogo`, `showFreeWorkoutSheet` | Logo; hoja de entrenamiento libre |
 
@@ -168,6 +178,10 @@ Utilidades: `Formatters` (números, peso, volumen, duración, fechas en `es`),
   `exercises`), `workouts` (con `routineDayId`), `personal_records` (peso ×
   reps y `bestVolume`), `weekly_progress`, `scheduled_workouts`.
   `saveWorkout` usa una transacción (sesión + semana + récords).
+- **Alimentación** — `NutritionService`, también bajo `users/{uid}`:
+  `nutrition_plans/{id}` (comidas y alimentos incrustados, campo `active`;
+  activar es un batch que desactiva el resto) y `nutrition_days/{yyyy-MM-dd}`
+  (consumo real, separado del plan).
 - Compatibilidad: una rutina sin `days` se lee como un único "Día 1"
   (`RoutineDay.fromExerciseIds`); un récord sin `bestVolume` no anuncia un
   récord de volumen.
@@ -219,8 +233,16 @@ firebase_auth_mocks.
   programados (entrenar, quitar, completado/no realizado).
 - Panel (`/home`): resumen semanal, racha, último entrenamiento (repite el
   mismo día de la rutina), último récord, accesos rápidos.
+- Alimentación (`/alimentacion`): plan activo con progreso de hoy (kcal y
+  macros), registro diario por comida, mis planes, progreso nutricional
+  (promedios de 7 días, días registrados, cumplimiento ±10 %, semana actual).
+  4 plantillas orientativas que se copian como planes editables; crear plan
+  a mano; comidas (categoría, nombre, horario) y alimentos (catálogo local o
+  manual, cantidades que recalculan valores). El resumen del entrenamiento
+  muestra "Alimentación de hoy" si el usuario usa el módulo.
 
 **Alcance:** aplicación **personal**. Cada usuario ve y gestiona solo su
-entrenamiento. Fuera de alcance por decisión: gestión de otros usuarios,
-clientes, entrenadores/staff, asignaciones, invitaciones, calendarios de
-equipo, asistencia, capacidad de clases y nutrición.
+entrenamiento y su alimentación. Fuera de alcance por decisión: gestión de
+otros usuarios, clientes, entrenadores/staff/nutricionistas, asignaciones,
+invitaciones, calendarios de equipo, asistencia, capacidad de clases,
+recomendaciones médicas y API externa de alimentos.

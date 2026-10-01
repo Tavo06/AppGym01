@@ -6,6 +6,7 @@ import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
 import '../../models/workout_model.dart';
+import '../../providers/nutrition_provider.dart';
 import '../../providers/progress_provider.dart';
 import '../../providers/workout_provider.dart';
 import '../../services/firestore_service.dart';
@@ -136,6 +137,9 @@ class WorkoutSummaryScreen extends StatelessWidget {
               ),
               const SizedBox(height: 20),
               _ExercisesDone(session: session),
+              // Alimentación de hoy (opcional): solo aparece si el usuario
+              // usa ese módulo; el entrenamiento no depende de él.
+              const _TodayNutritionCard(),
               if (newRecords.isNotEmpty) ...[
                 const SizedBox(height: 24),
                 _buildNewRecords(context, newRecords),
@@ -544,6 +548,103 @@ class _SummaryStat extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Alimentación de hoy en el resumen: calorías y proteínas consumidas frente
+/// al plan activo. Se oculta si el usuario no usa el módulo de alimentación.
+class _TodayNutritionCard extends StatefulWidget {
+  const _TodayNutritionCard();
+
+  @override
+  State<_TodayNutritionCard> createState() => _TodayNutritionCardState();
+}
+
+class _TodayNutritionCardState extends State<_TodayNutritionCard> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<NutritionProvider>().ensureLoaded();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<NutritionProvider>(
+      builder: (context, nutrition, _) {
+        final plan = nutrition.activePlan;
+        final today = nutrition.today.totals;
+        if (!nutrition.loaded || (plan == null && today.kcal == 0)) {
+          return const SizedBox.shrink();
+        }
+        final palette = context.palette;
+        String line(double value, double? target, String unit) =>
+            target == null || target <= 0
+            ? '${Formatters.formatNumber(value.round())} $unit'
+            : '${Formatters.formatNumber(value.round())} / '
+                  '${Formatters.formatNumber(target.round())} $unit';
+        return Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(top: 10),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: palette.surface,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: palette.surfaceMuted),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(
+                    Icons.restaurant_rounded,
+                    size: 20,
+                    color: AppColors.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Alimentación de hoy',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        color: palette.textPrimary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Calorías: ${line(today.kcal, plan?.calories, 'kcal')}',
+                style: TextStyle(fontSize: 13.5, color: palette.textPrimary),
+              ),
+              Text(
+                'Proteínas: ${line(today.protein, plan?.protein, 'g')}',
+                style: TextStyle(fontSize: 13.5, color: palette.textPrimary),
+              ),
+              if (plan != null) ...[
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: LinearProgressIndicator(
+                    value: NutritionProvider.progress(
+                      today.kcal,
+                      plan.calories,
+                    ),
+                    minHeight: 8,
+                    color: AppColors.primary,
+                    backgroundColor: palette.surfaceMuted,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
     );
   }
 }

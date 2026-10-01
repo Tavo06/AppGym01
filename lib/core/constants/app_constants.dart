@@ -80,4 +80,6 @@ class AppConstants {
   static const String subPersonalRecords = 'personal_records';
   static const String subWeeklyProgress = 'weekly_progress';
   static const String subScheduledWorkouts = 'scheduled_workouts';
+  static const String subNutritionPlans = 'nutrition_plans';
+  static const String subNutritionDays = 'nutrition_days';
 }

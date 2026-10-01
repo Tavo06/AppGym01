@@ -14,7 +14,8 @@ class _Destination {
 }
 
 /// Menú principal, en el mismo orden que las ramas del router:
-/// /rutinas, /entrenamiento, /ejercicio, /progreso, /calendario y /profile.
+/// /rutinas, /entrenamiento, /ejercicio, /progreso, /calendario,
+/// /alimentacion y /profile.
 const _destinations = [
   _Destination('Rutinas', Icons.list_alt_outlined, Icons.list_alt_rounded),
   _Destination('Entrenar', Icons.timer_outlined, Icons.timer_rounded),
@@ -28,6 +29,11 @@ const _destinations = [
     'Calendario',
     Icons.calendar_month_outlined,
     Icons.calendar_month_rounded,
+  ),
+  _Destination(
+    'Alimentación',
+    Icons.restaurant_outlined,
+    Icons.restaurant_rounded,
   ),
   _Destination('Perfil', Icons.person_outline_rounded, Icons.person_rounded),
 ];
@@ -83,9 +89,9 @@ class MainShell extends StatelessWidget {
       bottomNavigationBar: NavigationBar(
         selectedIndex: navigationShell.currentIndex,
         onDestinationSelected: _select,
-        // Con 6 destinos, en teléfonos estrechos solo se rotula el elegido
+        // Con 7 destinos, en teléfonos solo se rotula el elegido
         // para que las etiquetas no se corten (el resto tiene tooltip).
-        labelBehavior: MediaQuery.sizeOf(context).width < 420
+        labelBehavior: MediaQuery.sizeOf(context).width < 600
             ? NavigationDestinationLabelBehavior.onlyShowSelected
             : NavigationDestinationLabelBehavior.alwaysShow,
         destinations: [

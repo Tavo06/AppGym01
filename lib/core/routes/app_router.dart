@@ -8,7 +8,12 @@ import '../../providers/auth_provider.dart';
 import '../../screens/auth/change_password_screen.dart';
 import '../../screens/auth/login_screen.dart';
 import '../../screens/auth/verify_email_screen.dart';
+import '../../models/nutrition_model.dart';
 import '../../screens/calendar/calendar_screen.dart';
+import '../../screens/nutrition/nutrition_plan_form_screen.dart';
+import '../../screens/nutrition/nutrition_plan_screen.dart';
+import '../../screens/nutrition/nutrition_screen.dart';
+import '../../screens/nutrition/nutrition_templates_screen.dart';
 import '../../screens/exercises/create_exercise_screen.dart';
 import '../../screens/exercises/exercises_screen.dart';
 import '../../screens/home/home_screen.dart';
@@ -35,6 +40,10 @@ abstract final class AppRoutes {
   static const String crearRutina = '/rutinas/crear';
   static const String detalleRutina = '/rutinas/detalle';
   static const String calendario = '/calendario';
+  static const String alimentacion = '/alimentacion';
+  static const String plantillasAlimentacion = '/alimentacion/plantillas';
+  static const String nuevoPlanAlimentacion = '/alimentacion/plan/nuevo';
+  static const String planAlimentacion = '/alimentacion/plan/:id';
   static const String crearEjercicio = '/ejercicio/crear';
   static const String resumen = '/entrenamiento/resumen';
 }
@@ -93,6 +102,28 @@ class AppRouter {
         path: AppRoutes.panel,
         parentNavigatorKey: _rootKey,
         builder: (context, state) => const HomeScreen(),
+      ),
+      // Alimentación. `/alimentacion/plan/nuevo` va antes que `:id` para que
+      // no se interprete "nuevo" como identificador.
+      GoRoute(
+        path: AppRoutes.plantillasAlimentacion,
+        parentNavigatorKey: _rootKey,
+        builder: (context, state) => const NutritionTemplatesScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.nuevoPlanAlimentacion,
+        parentNavigatorKey: _rootKey,
+        builder: (context, state) => NutritionPlanFormScreen(
+          plan: state.extra is NutritionPlan
+              ? state.extra as NutritionPlan
+              : null,
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.planAlimentacion,
+        parentNavigatorKey: _rootKey,
+        builder: (context, state) =>
+            NutritionPlanScreen(planId: state.pathParameters['id'] ?? ''),
       ),
       // Recibe la rutina (relacionada con sus ejercicios) y devuelve con
       // `pop` el día elegido para entrenar o 'edit'.
@@ -185,6 +216,14 @@ class AppRouter {
               GoRoute(
                 path: AppRoutes.calendario,
                 builder: (context, state) => const CalendarScreen(),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: AppRoutes.alimentacion,
+                builder: (context, state) => const NutritionScreen(),
               ),
             ],
           ),

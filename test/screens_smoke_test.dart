@@ -2,7 +2,9 @@ import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:firebase_auth_mocks/firebase_auth_mocks.dart';
 import 'package:fitprogress/core/routes/app_router.dart';
 import 'package:fitprogress/core/theme/app_theme.dart';
+import 'package:fitprogress/core/constants/nutrition_catalog.dart';
 import 'package:fitprogress/models/exercise_model.dart';
+import 'package:fitprogress/models/nutrition_model.dart';
 import 'package:fitprogress/models/routine_day_model.dart';
 import 'package:fitprogress/models/routine_model.dart';
 import 'package:fitprogress/models/user_model.dart';
@@ -10,6 +12,7 @@ import 'package:fitprogress/models/workout_model.dart';
 import 'package:fitprogress/models/workout_set_model.dart';
 import 'package:fitprogress/providers/auth_provider.dart';
 import 'package:fitprogress/screens/auth/register_dialog.dart';
+import 'package:fitprogress/providers/nutrition_provider.dart';
 import 'package:fitprogress/providers/progress_provider.dart';
 import 'package:fitprogress/providers/schedule_provider.dart';
 import 'package:fitprogress/providers/session_cleanup.dart';
@@ -17,6 +20,7 @@ import 'package:fitprogress/providers/theme_provider.dart';
 import 'package:fitprogress/providers/workout_provider.dart';
 import 'package:fitprogress/services/app_firebase.dart';
 import 'package:fitprogress/services/firestore_service.dart';
+import 'package:fitprogress/services/nutrition_service.dart';
 import 'package:fitprogress/widgets/create_password_dialog.dart';
 import 'package:fitprogress/widgets/custom_button.dart';
 import 'package:fitprogress/widgets/progress_card.dart';
@@ -134,6 +138,7 @@ Future<_Harness> _pumpApp(
   final workout = WorkoutProvider();
   final progress = ProgressProvider();
   final schedule = ScheduleProvider();
+  final nutrition = NutritionProvider();
   final themeProvider = ThemeProvider(initialMode: theme);
   final router = AppRouter(auth).router;
   final unbind = bindSessionCleanup(
@@ -141,6 +146,7 @@ Future<_Harness> _pumpApp(
     workout: workout,
     progress: progress,
     schedule: schedule,
+    nutrition: nutrition,
   );
   addTearDown(unbind);
 
@@ -151,6 +157,7 @@ Future<_Harness> _pumpApp(
         ChangeNotifierProvider.value(value: workout),
         ChangeNotifierProvider.value(value: progress),
         ChangeNotifierProvider.value(value: schedule),
+        ChangeNotifierProvider.value(value: nutrition),
         ChangeNotifierProvider.value(value: themeProvider),
       ],
       child: MaterialApp.router(
@@ -1060,4 +1067,267 @@ void main() {
       });
     }
   }
+
+  // ---------------------------------------------------------------------
+  // Alimentación.
+  // ---------------------------------------------------------------------
+
+  /// Plan activo (copia de la plantilla de masa muscular) y un registro hoy.
+  Future<void> seedNutrition() async {
+    final service = NutritionService();
+    await service.savePlan(
+      _uid,
+      NutritionTemplate.all.first.toPlan(id: 'np1', active: true),
+    );
+    await service.saveDay(
+      _uid,
+      DailyNutritionRecord(date: DateTime.now()).withEntry(
+        FoodEntry(
+          mealType: MealType.breakfast,
+          food: NutritionCatalog.byName('Avena').toFood(100),
+        ),
+      ),
+    );
+  }
+
+  /// Elige un alimento del catálogo en la hoja "Agregar alimento"
+  /// desplazando la fila horizontal de chips si hace falta.
+  Future<void> pickCatalogFood(WidgetTester tester, String name) async {
+    final chip = find.widgetWithText(ActionChip, name);
+    await tester.dragUntilVisible(
+      chip,
+      find.descendant(
+        of: find.byType(BottomSheet),
+        matching: find.byType(ListView),
+      ),
+      const Offset(-150, 0),
+    );
+    await _settle(tester);
+    await tester.tap(chip);
+  }
+
+  NutritionProvider nutritionOf(_Harness app) => app
+      .router
+      .routerDelegate
+      .navigatorKey
+      .currentContext!
+      .read<NutritionProvider>();
+
+  testWidgets('Alimentación: sin plan, usar una plantilla la deja activa', (
+    tester,
+  ) async {
+    final app = await _pumpApp(tester, theme: ThemeMode.light);
+    await tapMenu(tester, 'Alimentación');
+    expect(_location(app), '/alimentacion');
+    expect(find.text('Alimentación saludable'), findsOneWidget);
+    expect(
+      find.text('Selecciona un plan o crea uno personalizado.'),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('Planes predeterminados'));
+    await _settle(tester);
+    expect(find.text('Pérdida de grasa'), findsWidgets);
+    await tester.ensureVisible(find.text('Usar este plan').first);
+    await _settle(tester);
+    await tester.tap(find.text('Usar este plan').first);
+    await _settle(tester, seconds: 2);
+
+    // Se abre la copia del usuario, ya activa y con sus comidas.
+    expect(find.text('Plan activo'), findsOneWidget);
+    expect(find.text('Comidas'), findsOneWidget);
+    expect(find.text('DESAYUNO'), findsOneWidget);
+    final plans = await AppFirebase.firestore
+        .collection('users/$_uid/nutrition_plans')
+        .get();
+    expect(plans.docs.single.data()['templateId'], 'masa-muscular');
+    expect(plans.docs.single.data()['active'], isTrue);
+  });
+
+  testWidgets('crear mi plan: validación, comida y alimento del catálogo', (
+    tester,
+  ) async {
+    final app = await _pumpApp(tester, theme: ThemeMode.light);
+    await _go(tester, app, '/alimentacion/plan/nuevo');
+    expect(find.text('Crear mi plan'), findsOneWidget);
+
+    // Sin datos: no se crea.
+    await tester.ensureVisible(find.text('Crear plan'));
+    await _settle(tester);
+    await tester.tap(find.text('Crear plan'));
+    await _settle(tester);
+    expect(find.text('Ingresa el nombre del plan.'), findsOneWidget);
+    expect(find.text('Ingresa las calorías diarias.'), findsOneWidget);
+
+    await tester.enterText(field('Nombre del plan'), 'Mi plan');
+    await tester.enterText(field('Calorías (kcal)'), '0');
+    await tester.enterText(field('Proteínas (g)'), '150');
+    await tester.enterText(field('Carbohidratos (g)'), '220');
+    await tester.enterText(field('Grasas (g)'), '60');
+    await tester.ensureVisible(find.text('Crear plan'));
+    await _settle(tester);
+    await tester.tap(find.text('Crear plan'));
+    await _settle(tester);
+    expect(find.text('Las calorías deben ser mayores que 0.'), findsOneWidget);
+
+    await tester.enterText(field('Calorías (kcal)'), '2100');
+    await tester.ensureVisible(find.text('Crear plan'));
+    await _settle(tester);
+    await tester.tap(find.text('Crear plan'));
+    await _settle(tester, seconds: 2);
+    expect(find.text('Comidas'), findsOneWidget);
+    expect(find.text('Plan activo'), findsOneWidget); // primer plan
+
+    // Agregar comida (diálogo) y un alimento del catálogo.
+    await tester.tap(find.text('Agregar comida'));
+    await _settle(tester);
+    await tester.tap(find.widgetWithText(FilledButton, 'Agregar'));
+    await _settle(tester, seconds: 2);
+    expect(find.text('DESAYUNO'), findsOneWidget);
+    // El aviso "Comida agregada." puede tapar el botón.
+    tester
+        .state<ScaffoldMessengerState>(find.byType(ScaffoldMessenger))
+        .clearSnackBars();
+    await tester.ensureVisible(find.text('Alimento'));
+    await _settle(tester);
+    await tester.tap(find.text('Alimento'));
+    await _settle(tester);
+    await pickCatalogFood(tester, 'Avena');
+    await _settle(tester);
+    await tester.enterText(field('Cantidad'), '50');
+    await _settle(tester);
+    final add = find.widgetWithText(CustomButton, 'Agregar alimento');
+    await tester.ensureVisible(add);
+    await _settle(tester);
+    await tester.tap(add);
+    await _settle(tester, seconds: 2);
+    expect(find.text('Avena'), findsOneWidget);
+    expect(find.textContaining('Total: 195 kcal'), findsOneWidget);
+
+    final plan = nutritionOf(app).plans.single;
+    expect(plan.name, 'Mi plan');
+    expect(plan.calories, 2100);
+    expect(plan.meals.single.foods.single.quantity, 50);
+  });
+
+  testWidgets('registro diario: el alimento se suma al progreso de hoy', (
+    tester,
+  ) async {
+    await seedNutrition();
+    final app = await _pumpApp(tester, theme: ThemeMode.light);
+    await tapMenu(tester, 'Alimentación');
+    final nutrition = nutritionOf(app);
+    expect(nutrition.today.totals.kcal, 389);
+    expect(find.text('PROGRESO DE HOY'), findsOneWidget);
+    expect(find.text('Aumento de masa muscular'), findsWidgets);
+
+    await tester.tap(
+      find.widgetWithText(FloatingActionButton, 'Registrar alimento'),
+    );
+    await _settle(tester);
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Almuerzo'));
+    await _settle(tester);
+    await pickCatalogFood(tester, 'Huevo');
+    await _settle(tester);
+    await tester.enterText(field('Cantidad'), '2');
+    await _settle(tester);
+    final submit = find.widgetWithText(CustomButton, 'Registrar');
+    await tester.ensureVisible(submit);
+    await _settle(tester);
+    await tester.tap(submit);
+    await _settle(tester, seconds: 2);
+
+    expect(find.text('Alimento agregado.'), findsOneWidget);
+    expect(nutrition.today.totals.kcal, 389 + 144);
+    expect(
+      nutrition.today.entriesFor(MealType.lunch).single.food.name,
+      'Huevo',
+    );
+    // El Consumer reconstruye el progreso del plan activo (2.500 kcal).
+    expect(find.textContaining('/ 2.500 kcal'), findsOneWidget);
+  });
+
+  testWidgets('el resumen del entrenamiento muestra la alimentación de hoy', (
+    tester,
+  ) async {
+    await seedNutrition();
+    final app = await _pumpApp(tester, theme: ThemeMode.light);
+    app.workout.startFreeWorkout([
+      ExerciseModel(id: 'e2', name: 'Sentadilla', muscleGroup: 'Piernas'),
+    ]);
+    app.workout.addSet('e2', weight: 50, repetitions: 10);
+    await _go(tester, app, '/entrenamiento');
+    await _scrollTo(tester, 'Finalizar entrenamiento');
+    await tester.tap(find.text('Finalizar entrenamiento'));
+    await _settle(tester);
+    await tester.tap(find.text('Finalizar').last);
+    await _settle(tester, seconds: 2);
+    expect(find.text('Entrenamiento guardado'), findsOneWidget);
+    expect(find.text('Alimentación de hoy'), findsOneWidget);
+    expect(find.text('Calorías: 389 / 2.500 kcal'), findsOneWidget);
+  });
+
+  for (final size in const [
+    Size(360, 800),
+    Size(390, 844),
+    Size(768, 1024),
+    Size(1024, 768),
+    Size(1400, 900),
+  ]) {
+    for (final theme in [ThemeMode.light, ThemeMode.dark]) {
+      testWidgets('Alimentación sin desbordes: ${size.width.toInt()} px '
+          '($theme)', (tester) async {
+        await seedNutrition();
+        final app = await _pumpApp(tester, theme: theme, size: size);
+        for (final route in [
+          '/alimentacion',
+          '/alimentacion/plantillas',
+          '/alimentacion/plan/nuevo',
+          '/alimentacion/plan/np1',
+        ]) {
+          await _go(tester, app, route);
+          expect(tester.takeException(), isNull, reason: route);
+        }
+        expect(find.text('Comidas'), findsOneWidget);
+        // Hoja de alimento abierta en la pantalla del plan.
+        await tester.ensureVisible(find.text('Alimento').first);
+        await _settle(tester);
+        await tester.tap(find.text('Alimento').first);
+        await _settle(tester);
+        expect(find.text('Agregar alimento'), findsWidgets);
+        expect(tester.takeException(), isNull, reason: 'hoja de alimento');
+      });
+    }
+  }
+
+  testWidgets('Alimentación carga aunque se hayan borrado datos a mano', (
+    tester,
+  ) async {
+    // Plan de plantilla al que se le borraron createdAt y las comidas, y un
+    // día sin campos de fecha.
+    final plan =
+        NutritionTemplate.all.first.toPlan(id: 'np1', active: true).toMap()
+          ..remove('createdAt')
+          ..remove('meals');
+    await AppFirebase.firestore
+        .doc('users/$_uid/nutrition_plans/np1')
+        .set(plan);
+    final key = DailyNutritionRecord.keyOf(DateTime.now());
+    await AppFirebase.firestore.doc('users/$_uid/nutrition_days/$key').set({
+      'entries': [
+        FoodEntry(
+          mealType: MealType.breakfast,
+          food: NutritionCatalog.byName('Avena').toFood(100),
+        ).toMap(),
+      ],
+    });
+
+    final app = await _pumpApp(tester, theme: ThemeMode.light);
+    await tapMenu(tester, 'Alimentación');
+    expect(find.text('Cargando tu alimentación...'), findsNothing);
+    expect(find.text('PROGRESO DE HOY'), findsOneWidget);
+    expect(nutritionOf(app).today.totals.kcal, 389);
+    // Las comidas borradas se restauraron desde la plantilla.
+    expect(nutritionOf(app).activePlan!.meals, isNotEmpty);
+  });
 }
