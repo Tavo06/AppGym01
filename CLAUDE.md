@@ -167,7 +167,15 @@ test/                                  app_logic, firestore_logic, rubric_logic,
 
 ## Tema y paleta
 
-Material 3, tipografía por defecto (sin `fontFamily`). Acceso: `context.palette`.
+Material 3. Acceso: `context.palette`.
+
+- **Tipografía Outfit** (`AppTheme.fontFamily`): archivos estáticos de 300 a
+  900 en `assets/fonts/outfit/` (licencia SIL OFL en `OFL.txt`), declarados
+  en `pubspec.yaml`. Va en `ThemeData` **y en cada `TextStyle` del tema**
+  (los estilos de los componentes sustituyen al de por defecto). Los textos
+  de las pantallas la heredan: no poner `inherit: false` ni otra
+  `fontFamily`. En las pruebas no se cargan fuentes (el texto sale como
+  bloques en capturas salvo que se cargue con `FontLoader`).
 Diseño **índigo + lima, "suave y elevado"**.
 
 - **Marca** (`AppColors`, igual en claro y oscuro): primario índigo `#5B5BF0`

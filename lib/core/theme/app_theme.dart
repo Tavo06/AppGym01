@@ -171,6 +171,12 @@ abstract final class AppShapes {
 class AppTheme {
   AppTheme._();
 
+  /// Tipografía de la marca (assets/fonts/outfit, declarada en pubspec).
+  /// Se pone también en cada `TextStyle` del tema: los estilos de los
+  /// componentes sustituyen al de por defecto y, sin ella, saldrían con la
+  /// fuente del sistema.
+  static const String fontFamily = 'Outfit';
+
   static ThemeData get light => _build(Brightness.light, AppPalette.light);
   static ThemeData get dark => _build(Brightness.dark, AppPalette.dark);
 
@@ -198,6 +204,7 @@ class AppTheme {
 
     final base = ThemeData(
       useMaterial3: true,
+      fontFamily: fontFamily,
       brightness: brightness,
       colorScheme: colorScheme,
       scaffoldBackgroundColor: p.background,
@@ -233,6 +240,7 @@ class AppTheme {
         scrolledUnderElevation: 0,
         centerTitle: false,
         titleTextStyle: TextStyle(
+          fontFamily: fontFamily,
           color: p.textPrimary,
           fontSize: 22,
           fontWeight: FontWeight.w800,
@@ -293,12 +301,13 @@ class AppTheme {
           horizontal: 18,
           vertical: 16,
         ),
-        hintStyle: TextStyle(color: p.textSecondary),
-        labelStyle: TextStyle(color: p.textSecondary),
+        hintStyle: TextStyle(fontFamily: fontFamily, color: p.textSecondary),
+        labelStyle: TextStyle(fontFamily: fontFamily, color: p.textSecondary),
         // La etiqueta solo se resalta con el color de marca en el campo con
         // el foco.
         floatingLabelStyle: WidgetStateTextStyle.resolveWith(
           (states) => TextStyle(
+            fontFamily: fontFamily,
             color: states.contains(WidgetState.error)
                 ? AppColors.error
                 : states.contains(WidgetState.focused)
@@ -337,6 +346,7 @@ class AppTheme {
           minimumSize: const Size.fromHeight(54),
           shape: AppShapes.button,
           textStyle: const TextStyle(
+            fontFamily: fontFamily,
             fontSize: 16,
             fontWeight: FontWeight.w800,
             letterSpacing: 0.4,
@@ -350,6 +360,7 @@ class AppTheme {
           side: BorderSide(color: p.border, width: 1.4),
           shape: AppShapes.button,
           textStyle: const TextStyle(
+            fontFamily: fontFamily,
             fontSize: 16,
             fontWeight: FontWeight.w800,
             letterSpacing: 0.4,
@@ -360,7 +371,10 @@ class AppTheme {
         style: TextButton.styleFrom(
           foregroundColor: p.primaryText,
           shape: AppShapes.small,
-          textStyle: const TextStyle(fontWeight: FontWeight.w700),
+          textStyle: const TextStyle(
+            fontFamily: fontFamily,
+            fontWeight: FontWeight.w700,
+          ),
         ),
       ),
       iconButtonTheme: IconButtonThemeData(
@@ -373,6 +387,7 @@ class AppTheme {
         highlightElevation: 6,
         shape: AppShapes.button,
         extendedTextStyle: const TextStyle(
+          fontFamily: fontFamily,
           fontSize: 15,
           fontWeight: FontWeight.w700,
         ),
@@ -383,10 +398,12 @@ class AppTheme {
         side: BorderSide.none,
         checkmarkColor: AppColors.onPrimary,
         labelStyle: TextStyle(
+          fontFamily: fontFamily,
           color: p.textPrimary,
           fontWeight: FontWeight.w600,
         ),
         secondaryLabelStyle: const TextStyle(
+          fontFamily: fontFamily,
           color: AppColors.onPrimary,
           fontWeight: FontWeight.w600,
         ),
@@ -404,6 +421,7 @@ class AppTheme {
         height: 76,
         labelTextStyle: WidgetStateProperty.resolveWith(
           (states) => TextStyle(
+            fontFamily: fontFamily,
             color: states.contains(WidgetState.selected)
                 ? p.textPrimary
                 : p.textSecondary,
@@ -428,11 +446,13 @@ class AppTheme {
         selectedIconTheme: const IconThemeData(color: AppColors.onAccent),
         unselectedIconTheme: IconThemeData(color: p.textSecondary),
         selectedLabelTextStyle: TextStyle(
+          fontFamily: fontFamily,
           color: p.textPrimary,
           fontWeight: FontWeight.w800,
           fontSize: 12.5,
         ),
         unselectedLabelTextStyle: TextStyle(
+          fontFamily: fontFamily,
           color: p.textSecondary,
           fontWeight: FontWeight.w500,
           fontSize: 12.5,
@@ -484,12 +504,19 @@ class AppTheme {
           color: p.secondaryContainer,
           borderRadius: BorderRadius.circular(10),
         ),
-        textStyle: TextStyle(color: p.onSecondaryContainer, fontSize: 12.5),
+        textStyle: TextStyle(
+          fontFamily: fontFamily,
+          color: p.onSecondaryContainer,
+          fontSize: 12.5,
+        ),
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
         backgroundColor: p.secondaryContainer,
-        contentTextStyle: TextStyle(color: p.onSecondaryContainer),
+        contentTextStyle: TextStyle(
+          fontFamily: fontFamily,
+          color: p.onSecondaryContainer,
+        ),
         actionTextColor: AppColors.accent,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadii.popup),

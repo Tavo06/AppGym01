@@ -74,6 +74,26 @@ flutter:
   assets:
     - lib/img/fondo.png
 
+  # Tipografía de la marca Vatio (Google Fonts, licencia SIL OFL 1.1:
+  # assets/fonts/outfit/OFL.txt). Archivos estáticos, uno por grosor.
+  fonts:
+    - family: Outfit
+      fonts:
+        - asset: assets/fonts/outfit/Outfit-Light.ttf
+          weight: 300
+        - asset: assets/fonts/outfit/Outfit-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/outfit/Outfit-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/outfit/Outfit-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/outfit/Outfit-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/outfit/Outfit-ExtraBold.ttf
+          weight: 800
+        - asset: assets/fonts/outfit/Outfit-Black.ttf
+          weight: 900
+
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg
