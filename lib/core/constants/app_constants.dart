@@ -7,18 +7,28 @@ import 'package:flutter/material.dart';
 class AppColors {
   AppColors._();
 
-  static const Color primary = Color(0xFFFF6D00);
-  static const Color primaryLight = Color(0xFFFFAB66);
-  static const Color primaryGradientEnd = Color(0xFFFF9E40);
+  /// Índigo eléctrico: color principal de la marca.
+  static const Color primary = Color(0xFF5B5BF0);
+  static const Color primaryLight = Color(0xFFA9AAF9);
+
+  /// Final del degradado de marca (índigo → violeta).
+  static const Color primaryGradientEnd = Color(0xFF8B5CF6);
   static const Color onPrimary = Color(0xFFFFFFFF);
 
-  static const Color navy = Color(0xFF14213D);
+  /// Lima: acento de la marca (indicador de navegación, destacados). Solo
+  /// como relleno, con [onAccent] encima: como texto sobre blanco no se lee.
+  static const Color accent = Color(0xFFA3E635);
+  static const Color onAccent = Color(0xFF1A2E05);
 
-  static const Color success = Color(0xFF2E9E57);
-  static const Color error = Color(0xFFD64545);
-  static const Color amber = Color(0xFFF5A524);
-  static const Color teal = Color(0xFF0F9D8A);
-  static const Color violet = Color(0xFF6C5CE7);
+  /// Tinta índigo oscura (fondos de avisos, texto fuerte). Conserva el
+  /// nombre histórico `navy`.
+  static const Color navy = Color(0xFF1C1D3F);
+
+  static const Color success = Color(0xFF16A34A);
+  static const Color error = Color(0xFFEF4444);
+  static const Color amber = Color(0xFFF59E0B);
+  static const Color teal = Color(0xFF0D9488);
+  static const Color violet = Color(0xFFA855F7);
 
   static const Color googleBlue = Color(0xFF4285F4);
 }
@@ -26,8 +36,11 @@ class AppColors {
 class AppConstants {
   AppConstants._();
 
-  static const String appName = 'FitProgress';
-  static const String appTagline = 'Entrena. Progresa. Supérate.';
+  static const String appName = 'Vatio';
+  static const String appTagline = 'Pura energía para entrenar.';
+
+  /// Código de país que se añade a un celular escrito sin `+` (Perú).
+  static const String defaultPhoneCountryCode = '+51';
 
   static const Set<String> muscleGroups = {
     'Pecho',
@@ -70,6 +83,13 @@ class AppConstants {
   static const int defaultWeeklySetsGoal = 20;
   static const int defaultWeeklyWorkoutsGoal = 3;
 
+  /// Meta diaria de agua por defecto (el usuario puede cambiarla en
+  /// Alimentación), cantidades rápidas y límites del registro, en ml.
+  static const int defaultWaterGoalMl = 2000;
+  static const List<int> waterPresets = [250, 500];
+  static const int maxWaterGoalMl = 10000;
+  static const int maxWaterPerDayMl = 20000;
+
   /// Semanas que muestra el historial semanal.
   static const int weeksInHistory = 12;
 
@@ -82,4 +102,5 @@ class AppConstants {
   static const String subScheduledWorkouts = 'scheduled_workouts';
   static const String subNutritionPlans = 'nutrition_plans';
   static const String subNutritionDays = 'nutrition_days';
+  static const String subAchievements = 'achievements';
 }

@@ -37,6 +37,7 @@ class _RegisterDialogState extends State<RegisterDialog> {
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _emailConfirmController = TextEditingController();
+  final _phoneController = TextEditingController();
   // La fecha se muestra como texto real del campo y no como `hint`: el
   // `hint` solo se ve con el campo enfocado, por lo que la fecha parecía
   // borrarse al tocar otro campo. El valor real vive en `_birthDate`.
@@ -48,11 +49,14 @@ class _RegisterDialogState extends State<RegisterDialog> {
   bool _registering = false;
   String? _error;
 
+  bool get _phoneRequired => AuthService.phoneSupported;
+
   @override
   void dispose() {
     _nameController.dispose();
     _emailController.dispose();
     _emailConfirmController.dispose();
+    _phoneController.dispose();
     _birthDateController.dispose();
     super.dispose();
   }
@@ -95,6 +99,7 @@ class _RegisterDialogState extends State<RegisterDialog> {
       final result = await authProvider.register(
         name: _nameController.text,
         email: _emailController.text,
+        phone: _phoneController.text,
         birthDate: _birthDate?.toIso8601String().split('T').first,
         goal: _goal,
         level: _level,
@@ -178,6 +183,22 @@ class _RegisterDialogState extends State<RegisterDialog> {
                     validator: (v) =>
                         Validators.validateEmailMatch(_emailController.text, v),
                   ),
+                  const SizedBox(height: 14),
+                  // Obligatorio donde se puede verificar por SMS; en
+                  // Windows es opcional y se verifica luego en móvil o web.
+                  CustomTextField(
+                    controller: _phoneController,
+                    label: _phoneRequired ? 'Teléfono' : 'Teléfono (opcional)',
+                    // Basta con los 9 dígitos: el código de país se añade
+                    // solo (ver `Validators.normalizePhone`).
+                    hint: '987 654 321',
+                    prefixText: '${AppConstants.defaultPhoneCountryCode} ',
+                    icon: Icons.phone_iphone_rounded,
+                    keyboardType: TextInputType.phone,
+                    textCapitalization: TextCapitalization.none,
+                    validator: (v) =>
+                        Validators.validatePhone(v, required: _phoneRequired),
+                  ),
                   const SizedBox(height: 22),
                   const AuthModalSection('Tu entrenamiento (opcional)'),
                   CustomTextField(
@@ -222,8 +243,11 @@ class _RegisterDialogState extends State<RegisterDialog> {
             ),
             const SizedBox(height: 12),
             Text(
-              'Te enviaremos un correo de verificación. Cuando lo '
-              'confirmes, crearás tu contraseña.',
+              _phoneRequired
+                  ? 'Te enviaremos un correo y un SMS de verificación. '
+                        'Cuando confirmes ambos, crearás tu contraseña.'
+                  : 'Te enviaremos un correo de verificación. Cuando lo '
+                        'confirmes, crearás tu contraseña.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 12.5,

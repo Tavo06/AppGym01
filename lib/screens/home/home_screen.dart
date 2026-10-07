@@ -3,19 +3,26 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/constants/app_constants.dart';
+import '../../core/routes/app_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
 import '../../models/personal_record_model.dart';
 import '../../models/progress_model.dart';
+import '../../models/scheduled_workout_model.dart';
 import '../../models/workout_model.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/nutrition_provider.dart';
 import '../../providers/progress_provider.dart';
+import '../../providers/schedule_provider.dart';
 import '../../providers/workout_provider.dart';
 import '../../widgets/app_feedback.dart';
+import '../../widgets/day_nutrition_summary.dart';
 import '../../widgets/free_workout_sheet.dart';
 import '../../widgets/progress_card.dart';
 import '../../widgets/responsive.dart';
+import '../../widgets/scheduled_workout_starter.dart';
 import '../../widgets/weekly_goals_card.dart';
+import '../../widgets/week_strip.dart';
 import '../../widgets/workout_card.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -32,11 +39,34 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) context.read<ProgressProvider>().refresh();
+      if (!mounted) return;
+      context.read<ProgressProvider>().refresh();
+      // Para la tarjeta "Hoy": lo programado y la alimentación del día.
+      final schedule = context.read<ScheduleProvider>();
+      if (!schedule.loaded && !schedule.loading) schedule.load();
+      context.read<NutritionProvider>().ensureLoaded();
     });
   }
 
-  Future<void> _refresh() => context.read<ProgressProvider>().refresh();
+  Future<void> _refresh() async {
+    final nutrition = context.read<NutritionProvider>();
+    await Future.wait([
+      context.read<ProgressProvider>().refresh(),
+      context.read<ScheduleProvider>().load(),
+      if (nutrition.loaded) nutrition.load(),
+    ]);
+  }
+
+  Future<void> _addWater() async {
+    try {
+      await context.read<NutritionProvider>().addWater(
+        AppConstants.waterPresets.first,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      showAppMessage(context, 'No se pudo guardar el agua.');
+    }
+  }
 
   Future<void> _startFreeWorkout() async {
     final started = await showFreeWorkoutSheet(context);
@@ -86,6 +116,12 @@ class _HomeScreenState extends State<HomeScreen> {
           sets: workout.totalCompletedSets,
           onContinue: () => context.go('/entrenamiento'),
         ),
+      const _ThisWeekCard(),
+      _TodayCard(
+        sessions: progressProvider.sessionsOn(DateTime.now()),
+        onTrain: (item) => startScheduledWorkout(context, item),
+        onAddWater: _addWater,
+      ),
     ];
 
     if (progress == null) {
@@ -199,16 +235,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Panel'),
-        // Se abre desde Rutinas (con botón atrás); si se llegó con `go`, se
-        // ofrece volver a la pantalla principal.
-        leading: Navigator.of(context).canPop()
-            ? null
-            : IconButton(
-                tooltip: 'Ir a rutinas',
-                icon: const Icon(Icons.list_alt_rounded),
-                onPressed: () => context.go('/rutinas'),
-              ),
+        // Pestaña de inicio "Hoy" (antes, el Panel a pantalla completa).
+        title: const Text('Hoy'),
+        automaticallyImplyLeading: false,
       ),
       body: SafeArea(
         top: false,
@@ -240,6 +269,210 @@ class _HomeScreenState extends State<HomeScreen> {
     final trimmed = name.trim();
     if (trimmed.isEmpty) return 'atleta';
     return trimmed.split(RegExp(r'\s+')).first;
+  }
+}
+
+/// La semana actual en una franja (calendario semanal): tocar un día abre
+/// el calendario en ese día.
+class _ThisWeekCard extends StatelessWidget {
+  const _ThisWeekCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final markers = dayMarkersFor(
+      progress: context.watch<ProgressProvider>(),
+      schedule: context.watch<ScheduleProvider>(),
+      nutrition: context.watch<NutritionProvider>(),
+    );
+    final now = DateTime.now();
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 8, 8, 14),
+        child: WeekStrip(
+          week: now,
+          selectedDay: now,
+          markers: markers,
+          onDaySelected: (day) => context.go(AppRoutes.calendario, extra: day),
+        ),
+      ),
+    );
+  }
+}
+
+/// Lo de hoy en un vistazo: entrenamientos programados (con "Entrenar") y,
+/// si el usuario usa Alimentación, calorías y agua del día.
+class _TodayCard extends StatelessWidget {
+  const _TodayCard({
+    required this.sessions,
+    required this.onTrain,
+    required this.onAddWater,
+  });
+
+  /// Sesiones terminadas hoy (para saber qué programados se cumplieron).
+  final List<WorkoutSession> sessions;
+  final ValueChanged<ScheduledWorkout> onTrain;
+  final VoidCallback onAddWater;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.palette;
+    final schedule = context.watch<ScheduleProvider>();
+    final nutrition = context.watch<NutritionProvider>();
+    final now = DateTime.now();
+    final planned = schedule.forDay(now);
+    final day = nutrition.today;
+    final plan = nutrition.activePlan;
+    final showNutrition = nutrition.loaded && (plan != null || !day.hasNoData);
+    final date = Formatters.formatLongDate(now);
+
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 12, 8, 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.today_rounded, color: AppColors.primary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Plan de hoy',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          color: palette.textPrimary,
+                        ),
+                      ),
+                      Text(
+                        date.isEmpty
+                            ? date
+                            : date[0].toUpperCase() + date.substring(1),
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          color: palette.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => context.go('/calendario'),
+                  child: const Text('Calendario'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.only(right: 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (!schedule.loaded)
+                    const SizedBox.shrink()
+                  else if (planned.isEmpty)
+                    Text(
+                      'Nada programado para hoy.',
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        color: palette.textSecondary,
+                      ),
+                    )
+                  else
+                    for (final item in planned)
+                      _TodayScheduled(
+                        item: item,
+                        done: item.isCompletedBy(sessions),
+                        onTrain: () => onTrain(item),
+                      ),
+                  if (showNutrition) ...[
+                    const Divider(height: 22),
+                    DayNutritionSummary(
+                      record: day,
+                      calorieTarget: plan?.calories ?? 0,
+                      waterGoal: nutrition.waterGoal,
+                      onAddWater: onAddWater,
+                    ),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: () => context.go('/alimentacion'),
+                        child: const Text('Ver alimentación'),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TodayScheduled extends StatelessWidget {
+  const _TodayScheduled({
+    required this.item,
+    required this.done,
+    required this.onTrain,
+  });
+
+  final ScheduledWorkout item;
+  final bool done;
+  final VoidCallback onTrain;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.palette;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Icon(
+            done ? Icons.check_circle_rounded : Icons.schedule_rounded,
+            size: 20,
+            color: done ? AppColors.success : AppColors.teal,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              item.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: palette.textPrimary,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          if (done)
+            const Text(
+              'Completado',
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
+                color: AppColors.success,
+              ),
+            )
+          else
+            FilledButton.tonal(
+              onPressed: onTrain,
+              // El tema da ancho mínimo infinito a los botones; en una fila
+              // se necesita un tamaño compacto.
+              style: FilledButton.styleFrom(minimumSize: const Size(0, 40)),
+              child: const Text('Entrenar'),
+            ),
+        ],
+      ),
+    );
   }
 }
 
@@ -309,10 +542,10 @@ class _Header extends StatelessWidget {
             backgroundColor: palette.primarySoft,
             child: Text(
               name.isEmpty ? '?' : name[0].toUpperCase(),
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 22,
                 fontWeight: FontWeight.w800,
-                color: AppColors.primary,
+                color: context.palette.primaryText,
               ),
             ),
           ),
@@ -371,7 +604,7 @@ class _ActiveWorkoutBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: AppColors.primary,
-      borderRadius: BorderRadius.circular(20),
+      borderRadius: BorderRadius.circular(AppRadii.card),
       child: InkWell(
         onTap: onContinue,
         borderRadius: BorderRadius.circular(20),
@@ -475,10 +708,10 @@ class _WelcomeCard extends StatelessWidget {
             backgroundColor: palette.primarySoft,
             child: Text(
               '$n',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12.5,
                 fontWeight: FontWeight.w800,
-                color: AppColors.primary,
+                color: context.palette.primaryText,
               ),
             ),
           ),
@@ -568,15 +801,34 @@ class _WeekSummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final palette = context.palette;
     final days = progress.weekVolumeByDay;
     final workouts = progress.weekWorkoutsByDay;
     final maxVolume = days.fold<double>(0, (m, v) => v > m ? v : m);
     final today = DateTime.now().weekday - 1;
     final comparison = _volumeComparison;
     final better = thisWeek.volume >= lastWeek.volume;
+    // Tarjeta protagonista: degradado de marca (igual en claro y oscuro),
+    // texto blanco y la lima para lo de hoy.
+    const onHero = Colors.white;
+    final onHeroSoft = Colors.white.withValues(alpha: 0.75);
+    const worse = Color(0xFFFFC2C2);
 
-    return Card(
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(AppRadii.card),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [AppColors.primary, AppColors.primaryGradientEnd],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.primary.withValues(alpha: 0.30),
+            blurRadius: 24,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
@@ -584,13 +836,13 @@ class _WeekSummary extends StatelessWidget {
           children: [
             Row(
               children: [
-                Expanded(
+                const Expanded(
                   child: Text(
                     'Esta semana',
                     style: TextStyle(
                       fontSize: 17,
                       fontWeight: FontWeight.w800,
-                      color: palette.textPrimary,
+                      color: onHero,
                     ),
                   ),
                 ),
@@ -600,9 +852,9 @@ class _WeekSummary extends StatelessWidget {
                       horizontal: 10,
                       vertical: 5,
                     ),
-                    decoration: BoxDecoration(
-                      color: palette.primarySoft,
-                      borderRadius: BorderRadius.circular(20),
+                    decoration: const ShapeDecoration(
+                      color: AppColors.accent,
+                      shape: AppShapes.chip,
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -610,15 +862,15 @@ class _WeekSummary extends StatelessWidget {
                         const Icon(
                           Icons.local_fire_department_rounded,
                           size: 16,
-                          color: AppColors.primary,
+                          color: AppColors.onAccent,
                         ),
                         const SizedBox(width: 4),
                         Text(
                           'Racha: $streak ${streak == 1 ? 'día' : 'días'}',
                           style: const TextStyle(
                             fontSize: 12.5,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.primary,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.onAccent,
                           ),
                         ),
                       ],
@@ -651,7 +903,7 @@ class _WeekSummary extends StatelessWidget {
                         ? Icons.trending_up_rounded
                         : Icons.trending_down_rounded,
                     size: 18,
-                    color: better ? AppColors.success : AppColors.error,
+                    color: better ? AppColors.accent : worse,
                   ),
                   const SizedBox(width: 6),
                   Expanded(
@@ -660,7 +912,7 @@ class _WeekSummary extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w700,
-                        color: better ? AppColors.success : AppColors.error,
+                        color: better ? AppColors.accent : worse,
                       ),
                     ),
                   ),
@@ -697,10 +949,12 @@ class _WeekSummary extends StatelessWidget {
                                   decoration: BoxDecoration(
                                     color: trained
                                         ? (index == today
-                                              ? AppColors.primary
-                                              : AppColors.primaryLight)
-                                        : palette.surfaceMuted,
-                                    borderRadius: BorderRadius.circular(7),
+                                              ? AppColors.accent
+                                              : Colors.white.withValues(
+                                                  alpha: 0.6,
+                                                ))
+                                        : Colors.white.withValues(alpha: 0.16),
+                                    borderRadius: BorderRadius.circular(8),
                                   ),
                                 ),
                               ),
@@ -711,10 +965,12 @@ class _WeekSummary extends StatelessWidget {
                             AppConstants.weekDays[index].substring(0, 1),
                             style: TextStyle(
                               fontSize: 11.5,
-                              fontWeight: FontWeight.w700,
+                              fontWeight: index == today
+                                  ? FontWeight.w900
+                                  : FontWeight.w700,
                               color: index == today
-                                  ? AppColors.primary
-                                  : palette.textSecondary,
+                                  ? AppColors.accent
+                                  : onHeroSoft,
                             ),
                           ),
                         ],
@@ -739,7 +995,7 @@ class _WeekFigure extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final palette = context.palette;
+    // Va sobre el degradado de "Esta semana": texto blanco.
     return Expanded(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -749,16 +1005,20 @@ class _WeekFigure extends StatelessWidget {
             alignment: Alignment.centerLeft,
             child: Text(
               value,
-              style: TextStyle(
-                fontSize: 22,
+              style: const TextStyle(
+                fontSize: 24,
                 fontWeight: FontWeight.w900,
-                color: palette.textPrimary,
+                letterSpacing: -0.5,
+                color: Colors.white,
               ),
             ),
           ),
           Text(
             label,
-            style: TextStyle(fontSize: 12, color: palette.textSecondary),
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.white.withValues(alpha: 0.75),
+            ),
           ),
         ],
       ),

@@ -7,6 +7,7 @@ import '../core/theme/app_theme.dart';
 import '../core/utils/formatters.dart';
 import '../models/nutrition_model.dart';
 import 'custom_button.dart';
+import 'food_search_sheet.dart';
 
 /// Resultado de la hoja: el alimento y la comida elegida.
 typedef FoodFormResult = ({MealType meal, FoodItem food});
@@ -66,7 +67,11 @@ class _FoodFormState extends State<_FoodForm> {
   final _protein = TextEditingController();
   final _carbs = TextEditingController();
   final _fat = TextEditingController();
-  late MealType _meal = widget.meal;
+  // Al registrar, una comida antigua se lleva a su grupo (p. ej. merienda →
+  // almuerzo) para que su chip aparezca elegido.
+  late MealType _meal = widget.chooseMeal
+      ? widget.meal.dailyGroup
+      : widget.meal;
   FoodUnit _unit = FoodUnit.grams;
 
   /// Alimento de referencia: al cambiar la cantidad, los valores se
@@ -119,6 +124,21 @@ class _FoodFormState extends State<_FoodForm> {
       _manual = false;
       _unit = food.unit;
       _name.text = food.name;
+      _fill(item, includeQuantity: true);
+    });
+  }
+
+  /// Busca en Open Food Facts y rellena el formulario con el producto
+  /// elegido (100 g; al cambiar la cantidad se recalcula en proporción).
+  Future<void> _searchOnline() async {
+    final product = await showFoodSearchSheet(context);
+    if (product == null || !mounted) return;
+    final item = product.toFood();
+    setState(() {
+      _base = item;
+      _manual = false;
+      _unit = FoodUnit.grams;
+      _name.text = item.name;
       _fill(item, includeQuantity: true);
     });
   }
@@ -216,7 +236,8 @@ class _FoodFormState extends State<_FoodForm> {
                       spacing: 8,
                       runSpacing: 8,
                       children: [
-                        for (final type in MealType.values)
+                        // Solo desayuno, almuerzo y cena.
+                        for (final type in MealType.daily)
                           ChoiceChip(
                             label: Text(type.label),
                             selected: _meal == type,
@@ -225,6 +246,14 @@ class _FoodFormState extends State<_FoodForm> {
                       ],
                     ),
                   ],
+                  const SizedBox(height: 14),
+                  // API REST de Open Food Facts: productos reales con sus
+                  // valores nutricionales.
+                  OutlinedButton.icon(
+                    onPressed: _searchOnline,
+                    icon: const Icon(Icons.travel_explore_rounded),
+                    label: const Text('Buscar en Open Food Facts'),
+                  ),
                   const SizedBox(height: 14),
                   Text(
                     'Elige un alimento común o escribe el tuyo',
@@ -418,10 +447,10 @@ class FoodRow extends StatelessWidget {
             ),
             Text(
               '${Formatters.formatNumber(food.kcal.round())} kcal',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w800,
-                color: AppColors.primary,
+                color: context.palette.primaryText,
               ),
             ),
             if (onDelete != null)

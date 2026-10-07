@@ -3,13 +3,16 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/constants/app_constants.dart';
+import '../../core/routes/app_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
 import '../../models/workout_model.dart';
+import '../../providers/achievement_provider.dart';
 import '../../providers/nutrition_provider.dart';
 import '../../providers/progress_provider.dart';
 import '../../providers/workout_provider.dart';
 import '../../services/firestore_service.dart';
+import '../../widgets/achievement_widgets.dart';
 import '../../widgets/responsive.dart';
 import '../../widgets/custom_button.dart';
 
@@ -144,6 +147,8 @@ class WorkoutSummaryScreen extends StatelessWidget {
                 const SizedBox(height: 24),
                 _buildNewRecords(context, newRecords),
               ],
+              // Logros conseguidos desde que empezó el entrenamiento.
+              _UnlockedAchievements(since: session.startedAt),
               const SizedBox(height: 32),
               CustomButton(
                 label: 'Volver a rutinas',
@@ -250,10 +255,10 @@ class WorkoutSummaryScreen extends StatelessWidget {
                               '${Formatters.formatWeight(record.newWeight)} kg '
                               '× ${record.reps}',
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w800,
-                      color: AppColors.primary,
+                      color: context.palette.primaryText,
                     ),
                   ),
                 if (record.isVolumeRecord && !record.isFirst)
@@ -552,8 +557,95 @@ class _SummaryStat extends StatelessWidget {
   }
 }
 
+/// Logros desbloqueados durante el entrenamiento (se oculta si no hay).
+class _UnlockedAchievements extends StatelessWidget {
+  const _UnlockedAchievements({required this.since});
+
+  final DateTime since;
+
+  @override
+  Widget build(BuildContext context) {
+    final unlocked = context.watch<AchievementProvider>().announcedSince(since);
+    if (unlocked.isEmpty) return const SizedBox.shrink();
+    final palette = context.palette;
+    return Padding(
+      padding: const EdgeInsets.only(top: 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            unlocked.length == 1
+                ? '¡Logro desbloqueado!'
+                : '¡${unlocked.length} logros desbloqueados!',
+            style: TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w800,
+              color: palette.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 10),
+          for (final definition in unlocked)
+            Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AchievementColors.of(definition.tier)
+                    .withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: AchievementColors.of(definition.tier)
+                      .withValues(alpha: 0.45),
+                ),
+              ),
+              child: Row(
+                children: [
+                  AchievementBadge(
+                    definition: definition,
+                    unlocked: true,
+                    size: 44,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          definition.title,
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                            color: palette.textPrimary,
+                          ),
+                        ),
+                        Text(
+                          definition.description,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: palette.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: () => context.push(AppRoutes.logros),
+              child: const Text('Ver todos mis logros'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Alimentación de hoy en el resumen: calorías y proteínas consumidas frente
-/// al plan activo. Se oculta si el usuario no usa el módulo de alimentación.
+/// al plan activo, y agua frente a la meta diaria. Se oculta si el usuario no
+/// usa el módulo de alimentación.
 class _TodayNutritionCard extends StatefulWidget {
   const _TodayNutritionCard();
 
@@ -576,7 +668,9 @@ class _TodayNutritionCardState extends State<_TodayNutritionCard> {
       builder: (context, nutrition, _) {
         final plan = nutrition.activePlan;
         final today = nutrition.today.totals;
-        if (!nutrition.loaded || (plan == null && today.kcal == 0)) {
+        final water = nutrition.today.waterMl;
+        if (!nutrition.loaded ||
+            (plan == null && today.kcal == 0 && water == 0)) {
           return const SizedBox.shrink();
         }
         final palette = context.palette;
@@ -624,6 +718,11 @@ class _TodayNutritionCardState extends State<_TodayNutritionCard> {
               ),
               Text(
                 'Proteínas: ${line(today.protein, plan?.protein, 'g')}',
+                style: TextStyle(fontSize: 13.5, color: palette.textPrimary),
+              ),
+              Text(
+                'Agua: ${Formatters.formatWater(water)} / '
+                '${Formatters.formatWater(nutrition.waterGoal)}',
                 style: TextStyle(fontSize: 13.5, color: palette.textPrimary),
               ),
               if (plan != null) ...[

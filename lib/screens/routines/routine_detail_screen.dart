@@ -175,9 +175,9 @@ class _DayCard extends StatelessWidget {
                   ),
                   child: Text(
                     '$number',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontWeight: FontWeight.w800,
-                      color: AppColors.primary,
+                      color: context.palette.primaryText,
                     ),
                   ),
                 ),
@@ -329,8 +329,8 @@ Future<RoutineDay?> showRoutineDayPicker(
                       backgroundColor: palette.primarySoft,
                       child: Text(
                         '${i + 1}',
-                        style: const TextStyle(
-                          color: AppColors.primary,
+                        style: TextStyle(
+                          color: context.palette.primaryText,
                           fontWeight: FontWeight.w800,
                         ),
                       ),

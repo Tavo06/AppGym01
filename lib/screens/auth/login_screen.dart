@@ -95,10 +95,10 @@ class _LoginScreenState extends State<LoginScreen> {
         password: _passwordController.text,
       );
       if (!mounted) return;
-      _showMessage('Bienvenido a FitProgress', AppColors.success);
+      _showMessage('Bienvenido a ${AppConstants.appName}', AppColors.success);
       // La redirección real la aplica el router: si el correo no está
       // verificado, `/home` rebota a `/verify-email` por sí sola.
-      context.go('/rutinas');
+      context.go('/hoy');
     } catch (error) {
       if (!mounted) return;
       _showMessage(friendlyError(error), AppColors.error);
@@ -110,7 +110,7 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       await authProvider.loginWithGoogle();
       if (!mounted) return;
-      context.go('/rutinas');
+      context.go('/hoy');
     } on AuthCancelledException {
       // El usuario canceló el diálogo de Google.
     } catch (error) {
@@ -335,10 +335,10 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
             GestureDetector(
               onTap: loading ? null : _openRegister,
-              child: const Text(
+              child: Text(
                 'Regístrate',
                 style: TextStyle(
-                  color: AppColors.primary,
+                  color: context.palette.primaryText,
                   fontWeight: FontWeight.w700,
                 ),
               ),

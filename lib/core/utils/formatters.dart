@@ -20,6 +20,14 @@ class Formatters {
     );
   }
 
+  static final NumberFormat _liters = NumberFormat('#,##0.##', 'es');
+
+  /// Agua: "750 ml" por debajo del litro y "1,25 L" a partir de él.
+  static String formatWater(int ml) {
+    if (ml < 1000) return '${_number.format(ml)} ml';
+    return '${_liters.format(ml / 1000)} L';
+  }
+
   static String formatVolume(double volume) {
     return '${formatNumber(volume)} kg';
   }

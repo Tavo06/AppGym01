@@ -168,8 +168,9 @@ class NutritionService {
     return days;
   }
 
+  /// Guarda el día; si ya no tiene alimentos ni agua, borra el documento.
   Future<void> saveDay(String uid, DailyNutritionRecord record) async {
-    if (record.isEmpty) {
+    if (record.hasNoData) {
       await _daysRef(uid).doc(record.dateKey).delete();
       return;
     }

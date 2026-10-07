@@ -10,6 +10,8 @@ class UserModel {
     required this._name,
     required this._email,
     this._photoUrl,
+    this._phone,
+    this._phoneVerified = false,
     this._birthDate,
     this._goal,
     this._level,
@@ -24,6 +26,8 @@ class UserModel {
   final String _name;
   final String _email;
   final String? _photoUrl;
+  final String? _phone;
+  final bool _phoneVerified;
   final String? _birthDate;
   final String? _goal;
   final String? _level;
@@ -37,6 +41,13 @@ class UserModel {
   String get name => _name;
   String get email => _email;
   String? get photoUrl => _photoUrl;
+
+  /// Teléfono en formato internacional (E.164, p. ej. `+51987654321`).
+  String? get phone => _phone;
+
+  /// Copia informativa: la verificación real la decide Firebase Auth
+  /// (proveedor `phone` vinculado a la cuenta).
+  bool get phoneVerified => _phoneVerified;
   String? get birthDate => _birthDate;
   String? get goal => _goal;
   String? get level => _level;
@@ -56,6 +67,8 @@ class UserModel {
       'name': _name,
       'email': _email,
       'photoUrl': _photoUrl,
+      'phone': _phone,
+      'phoneVerified': _phoneVerified,
       'birthDate': _birthDate,
       'goal': _goal,
       'level': _level,
@@ -73,6 +86,8 @@ class UserModel {
       name: map['name'] as String? ?? '',
       email: map['email'] as String? ?? '',
       photoUrl: map['photoUrl'] as String?,
+      phone: map['phone'] as String?,
+      phoneVerified: map['phoneVerified'] as bool? ?? false,
       birthDate: map['birthDate'] as String?,
       goal: map['goal'] as String?,
       level: map['level'] as String?,
@@ -88,6 +103,8 @@ class UserModel {
     String? name,
     String? email,
     String? photoUrl,
+    String? phone,
+    bool? phoneVerified,
     String? birthDate,
     String? goal,
     String? level,
@@ -100,6 +117,8 @@ class UserModel {
       name: name ?? _name,
       email: email ?? _email,
       photoUrl: photoUrl ?? _photoUrl,
+      phone: phone ?? _phone,
+      phoneVerified: phoneVerified ?? _phoneVerified,
       birthDate: birthDate ?? _birthDate,
       goal: goal ?? _goal,
       level: level ?? _level,

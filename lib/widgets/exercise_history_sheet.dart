@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../core/constants/app_constants.dart';
 import '../core/theme/app_theme.dart';
 import '../core/utils/formatters.dart';
 import '../models/exercise_model.dart';
@@ -110,9 +109,9 @@ class _ExerciseHistory extends StatelessWidget {
                               ),
                               Text(
                                 Formatters.formatVolume(entry.record.volume),
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontWeight: FontWeight.w800,
-                                  color: AppColors.primary,
+                                  color: context.palette.primaryText,
                                 ),
                               ),
                             ],

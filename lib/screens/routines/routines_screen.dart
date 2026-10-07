@@ -12,6 +12,7 @@ import '../../models/workout_model.dart';
 import '../../providers/progress_provider.dart';
 import '../../providers/workout_provider.dart';
 import '../../services/firestore_service.dart';
+import '../../widgets/train_section_tabs.dart';
 import '../../widgets/app_feedback.dart';
 import '../../widgets/confirmation_dialog.dart';
 import '../../widgets/empty_state.dart';
@@ -248,16 +249,14 @@ class _RoutinesScreenState extends State<RoutinesScreen> {
       appBar: AppBar(
         title: const Text('Mis rutinas'),
         automaticallyImplyLeading: false,
-        actions: [
-          TextButton.icon(
-            onPressed: () => context.push('/home'),
-            icon: const Icon(Icons.dashboard_outlined, size: 20),
-            label: const Text('Panel'),
-          ),
-          const SizedBox(width: 8),
+      ),
+      // Selector "Rutinas | Ejercicios" de la pestaña Entrenar.
+      body: Column(
+        children: [
+          const TrainSectionTabs(current: TrainSection.rutinas),
+          Expanded(child: _buildBody()),
         ],
       ),
-      body: _buildBody(),
     );
   }
 

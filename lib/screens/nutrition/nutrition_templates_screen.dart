@@ -6,6 +6,7 @@ import '../../core/constants/app_constants.dart';
 import '../../core/constants/nutrition_catalog.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
+import '../../providers/auth_provider.dart';
 import '../../providers/nutrition_provider.dart';
 import '../../widgets/app_feedback.dart';
 import '../../widgets/nutrition_progress_panel.dart';
@@ -48,6 +49,14 @@ class _NutritionTemplatesScreenState extends State<NutritionTemplatesScreen> {
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
+    // La plantilla que encaja con el objetivo del perfil va primero.
+    final goal = context.watch<AuthProvider>().profile?.goal;
+    final suggested = NutritionTemplate.forProfileGoal(goal);
+    final templates = [
+      ?suggested,
+      for (final template in NutritionTemplate.all)
+        if (template.id != suggested?.id) template,
+    ];
     return Scaffold(
       appBar: AppBar(title: const Text('Planes predeterminados')),
       body: ListView(
@@ -99,11 +108,14 @@ class _NutritionTemplatesScreenState extends State<NutritionTemplatesScreen> {
                         spacing: 16,
                         runSpacing: 16,
                         children: [
-                          for (final template in NutritionTemplate.all)
+                          for (final template in templates)
                             SizedBox(
                               width: width,
                               child: _TemplateCard(
                                 template: template,
+                                suggestedFor: template.id == suggested?.id
+                                    ? goal
+                                    : null,
                                 saving: _saving == template.id,
                                 onUse: _saving == null
                                     ? () => _use(template)
@@ -129,22 +141,42 @@ class _TemplateCard extends StatelessWidget {
     required this.template,
     required this.saving,
     required this.onUse,
+    this.suggestedFor,
   });
 
   final NutritionTemplate template;
   final bool saving;
   final VoidCallback? onUse;
 
+  /// Objetivo del perfil para el que se sugiere esta plantilla.
+  final String? suggestedFor;
+
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
     return Card(
       margin: EdgeInsets.zero,
+      shape: suggestedFor == null
+          ? null
+          : RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadii.card),
+              side: const BorderSide(color: AppColors.primary, width: 1.5),
+            ),
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (suggestedFor != null) ...[
+              Align(
+                alignment: Alignment.centerLeft,
+                child: _Macro(
+                  'Sugerida para tu objetivo: $suggestedFor',
+                  AppColors.primary,
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
             Text(
               template.name,
               style: TextStyle(

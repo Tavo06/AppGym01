@@ -15,9 +15,11 @@ import '../../screens/nutrition/nutrition_plan_screen.dart';
 import '../../screens/nutrition/nutrition_screen.dart';
 import '../../screens/nutrition/nutrition_templates_screen.dart';
 import '../../screens/exercises/create_exercise_screen.dart';
+import '../../screens/exercises/exercise_catalog_screen.dart';
 import '../../screens/exercises/exercises_screen.dart';
 import '../../screens/home/home_screen.dart';
 import '../../screens/main/main_shell.dart';
+import '../../screens/profile/achievements_screen.dart';
 import '../../screens/profile/edit_profile_screen.dart';
 import '../../screens/profile/profile_screen.dart';
 import '../../screens/progress/progress_screen.dart';
@@ -36,7 +38,13 @@ abstract final class AppRoutes {
   static const String ejercicio = '/ejercicio';
   static const String progreso = '/progreso';
   static const String perfil = '/profile';
+  static const String logros = '/profile/logros';
+
+  /// Antigua ruta del Panel; ahora es un alias de [hoy].
   static const String panel = '/home';
+
+  /// Pestaña "Hoy" (pantalla de inicio).
+  static const String hoy = '/hoy';
   static const String crearRutina = '/rutinas/crear';
   static const String detalleRutina = '/rutinas/detalle';
   static const String calendario = '/calendario';
@@ -45,6 +53,9 @@ abstract final class AppRoutes {
   static const String nuevoPlanAlimentacion = '/alimentacion/plan/nuevo';
   static const String planAlimentacion = '/alimentacion/plan/:id';
   static const String crearEjercicio = '/ejercicio/crear';
+
+  /// Catálogo público de ejercicios (API REST de wger).
+  static const String catalogoEjercicios = '/ejercicio/catalogo';
   static const String resumen = '/entrenamiento/resumen';
 }
 
@@ -67,6 +78,8 @@ class AppRouter {
     '/exercises': AppRoutes.ejercicio,
     '/exercises/create': AppRoutes.crearEjercicio,
     '/progress': AppRoutes.progreso,
+    // El Panel pasó a ser la pestaña "Hoy".
+    AppRoutes.panel: AppRoutes.hoy,
     // Antes eran páginas; ahora son modales que se abren desde el Login.
     '/register': '/login',
     '/forgot-password': '/login',
@@ -93,15 +106,14 @@ class AppRouter {
         builder: (context, state) => const EditProfileScreen(),
       ),
       GoRoute(
+        path: AppRoutes.logros,
+        parentNavigatorKey: _rootKey,
+        builder: (context, state) => const AchievementsScreen(),
+      ),
+      GoRoute(
         path: '/change-password',
         parentNavigatorKey: _rootKey,
         builder: (context, state) => const ChangePasswordScreen(),
-      ),
-      // Panel con el resumen general (antes era la pantalla de inicio).
-      GoRoute(
-        path: AppRoutes.panel,
-        parentNavigatorKey: _rootKey,
-        builder: (context, state) => const HomeScreen(),
       ),
       // Alimentación. `/alimentacion/plan/nuevo` va antes que `:id` para que
       // no se interprete "nuevo" como identificador.
@@ -154,6 +166,11 @@ class AppRouter {
               : null,
         ),
       ),
+      GoRoute(
+        path: AppRoutes.catalogoEjercicios,
+        parentNavigatorKey: _rootKey,
+        builder: (context, state) => const ExerciseCatalogScreen(),
+      ),
       // Recibe el resultado del entrenamiento recién guardado.
       GoRoute(
         path: AppRoutes.resumen,
@@ -167,10 +184,22 @@ class AppRouter {
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) =>
             MainShell(navigationShell: navigationShell),
+        // Las 5 primeras ramas son las pestañas visibles (en el mismo orden
+        // que la barra de MainShell); las 3 últimas no tienen pestaña propia
+        // y la barra marca su pestaña "madre" (ver MainShell.parentTab).
         branches: [
           StatefulShellBranch(
             routes: [
-              // Pantalla principal. Recibe la sesión completada al volver
+              // Pantalla de inicio: lo de hoy, la semana y el resumen.
+              GoRoute(
+                path: AppRoutes.hoy,
+                builder: (context, state) => const HomeScreen(),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              // Pestaña "Entrenar". Recibe la sesión completada al volver
               // del entrenamiento.
               GoRoute(
                 path: AppRoutes.rutinas,
@@ -179,6 +208,30 @@ class AppRouter {
                       ? state.extra as WorkoutSession
                       : null,
                 ),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: AppRoutes.alimentacion,
+                builder: (context, state) => const NutritionScreen(),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: AppRoutes.progreso,
+                builder: (context, state) => const ProgressScreen(),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: AppRoutes.perfil,
+                builder: (context, state) => const ProfileScreen(),
               ),
             ],
           ),
@@ -205,33 +258,14 @@ class AppRouter {
           ),
           StatefulShellBranch(
             routes: [
-              GoRoute(
-                path: AppRoutes.progreso,
-                builder: (context, state) => const ProgressScreen(),
-              ),
-            ],
-          ),
-          StatefulShellBranch(
-            routes: [
+              // Calendario semanal. Puede recibir el día a mostrar.
               GoRoute(
                 path: AppRoutes.calendario,
-                builder: (context, state) => const CalendarScreen(),
-              ),
-            ],
-          ),
-          StatefulShellBranch(
-            routes: [
-              GoRoute(
-                path: AppRoutes.alimentacion,
-                builder: (context, state) => const NutritionScreen(),
-              ),
-            ],
-          ),
-          StatefulShellBranch(
-            routes: [
-              GoRoute(
-                path: AppRoutes.perfil,
-                builder: (context, state) => const ProfileScreen(),
+                builder: (context, state) => CalendarScreen(
+                  initialDay: state.extra is DateTime
+                      ? state.extra as DateTime
+                      : null,
+                ),
               ),
             ],
           ),
@@ -270,9 +304,10 @@ class AppRouter {
       return null;
     }
 
-    if (!_authProvider.isEmailVerified) {
-      // Un usuario sin verificar solo puede permanecer en la pantalla de
-      // verificación: cualquier otra ruta lo devolvería allí.
+    if (!_authProvider.isAccountVerified) {
+      // Un usuario sin verificar (correo y, si se le exige, teléfono) solo
+      // puede permanecer en la pantalla de verificación: cualquier otra
+      // ruta lo devolvería allí.
       if (location == '/verify-email') return null;
       return '/verify-email';
     }
@@ -284,7 +319,7 @@ class AppRouter {
     }
 
     if (_publicRoutes.contains(location)) {
-      return AppRoutes.rutinas;
+      return AppRoutes.hoy;
     }
     return null;
   }

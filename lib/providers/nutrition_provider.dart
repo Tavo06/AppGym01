@@ -1,7 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/constants/app_constants.dart';
 import '../core/constants/nutrition_catalog.dart';
 import '../models/nutrition_model.dart';
 import '../services/app_firebase.dart';
@@ -17,6 +19,18 @@ typedef NutritionStats = ({
   /// Porcentaje de días registrados con calorías entre el 90 % y el 110 %
   /// del objetivo del plan activo (0 si no hay plan activo).
   int compliancePercent,
+});
+
+/// Estadísticas del agua registrada en un periodo.
+typedef WaterStats = ({
+  /// Días con algo de agua registrada.
+  int daysRegistered,
+
+  /// Media en ml de los días con registro.
+  int averageMl,
+
+  /// Días en que se alcanzó la meta diaria.
+  int daysOnGoal,
 });
 
 /// Estado global de Alimentación del usuario autenticado: sus planes, el
@@ -43,11 +57,16 @@ class NutritionProvider extends ChangeNotifier {
   bool _loaded = false;
   String? _error;
   int _generation = 0;
+  int _waterGoal = AppConstants.defaultWaterGoalMl;
+  String? _waterGoalUid;
 
   List<NutritionPlan> get plans => List.unmodifiable(_plans);
   bool get loading => _loading;
   bool get loaded => _loaded;
   String? get error => _error;
+
+  /// Meta diaria de agua en ml (se guarda en el dispositivo por usuario).
+  int get waterGoal => _waterGoal;
 
   String? get _uid =>
       _currentUid != null ? _currentUid() : AppFirebase.auth.currentUser?.uid;
@@ -76,6 +95,9 @@ class NutritionProvider extends ChangeNotifier {
 
   DailyNutritionRecord get today => recordFor(DateTime.now());
 
+  /// Días con registros cargados (los últimos [historyDays]).
+  List<DailyNutritionRecord> get loadedDays => List.unmodifiable(_days.values);
+
   // -------------------------------------------------------------- carga
 
   /// Carga los datos solo si todavía no se cargaron.
@@ -103,11 +125,18 @@ class NutritionProvider extends ChangeNotifier {
     try {
       final from = _day(DateTime.now())
           .subtract(const Duration(days: historyDays - 1));
-      final results = await Future.wait([
+      final results = await Future.wait<Object?>([
         _service.getPlans(uid),
         _service.getDays(uid, from),
+        // La meta de agua va dentro del mismo límite de tiempo: si el
+        // almacenamiento no responde, la carga no debe quedarse colgada.
+        if (_waterGoalUid != uid) _readWaterGoal(uid),
       ]).timeout(loadTimeout);
       if (generation != _generation) return;
+      if (results.length > 2) {
+        _waterGoal = results[2] as int;
+        _waterGoalUid = uid;
+      }
       _plans = (results[0] as List).cast<NutritionPlan>();
       _days
         ..clear()
@@ -139,6 +168,8 @@ class NutritionProvider extends ChangeNotifier {
     _loading = false;
     _loaded = false;
     _error = null;
+    _waterGoal = AppConstants.defaultWaterGoalMl;
+    _waterGoalUid = null;
     notifyListeners();
   }
 
@@ -206,6 +237,52 @@ class NutritionProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Nombre del plan que guarda el objetivo diario simplificado.
+  static const String dailyGoalPlanName = 'Mi objetivo diario';
+
+  /// Fija el objetivo diario (pantalla Comida). Se guarda en el plan activo
+  /// (un plan antiguo conserva sus comidas) o, si no hay, en un plan nuevo
+  /// que queda activo: así los datos existentes, las estadísticas y los
+  /// logros siguen funcionando igual.
+  Future<NutritionPlan> setDailyGoal({
+    required String goal,
+    required double calories,
+    required double protein,
+    double carbs = 0,
+    double fat = 0,
+    String templateId = '',
+  }) async {
+    final uid = _requireUid;
+    final current = activePlan;
+    if (current != null) {
+      final updated = current.copyWith(
+        goal: goal,
+        calories: calories,
+        protein: protein,
+        carbs: carbs,
+        fat: fat,
+        templateId: templateId,
+      );
+      await updatePlan(updated);
+      return updated;
+    }
+    final plan = NutritionPlan(
+      id: _service.newDocId,
+      name: dailyGoalPlanName,
+      goal: goal,
+      calories: calories,
+      protein: protein,
+      carbs: carbs,
+      fat: fat,
+      active: true,
+      templateId: templateId,
+    );
+    await _service.savePlan(uid, plan);
+    _plans = [..._plans, plan];
+    notifyListeners();
+    return plan;
+  }
+
   /// Deja [planId] como único plan activo (o ninguno si es `null`).
   Future<void> setActivePlan(String? planId) async {
     final uid = _requireUid;
@@ -261,29 +338,119 @@ class NutritionProvider extends ChangeNotifier {
 
   /// Registra un alimento consumido en la comida [mealType] de [date] (hoy
   /// por defecto). Se suma automáticamente al consumo del día.
-  Future<void> logFood(
-    MealType mealType,
-    FoodItem food, {
+  Future<void> logFood(MealType mealType, FoodItem food, {DateTime? date}) =>
+      _updateDay(
+        date,
+        (day) => day.withEntry(
+          FoodEntry(mealType: mealType, food: food.withNewId()),
+        ),
+      );
+
+  Future<void> removeEntry(String entryId, {DateTime? date}) =>
+      _updateDay(date, (day) => day.withoutEntry(entryId));
+
+  /// Aplica [change] al día [date] (hoy por defecto) y lo guarda.
+  ///
+  /// La memoria se actualiza antes de escribir en Firestore: así, varios
+  /// cambios seguidos (dos toques en "+250 ml", o agua mientras se registra
+  /// un alimento) parten siempre del último estado y no se pisan entre sí.
+  /// Si la escritura falla se vuelve al estado anterior (salvo que otro
+  /// cambio posterior ya lo haya reemplazado) y se relanza el error.
+  Future<void> _updateDay(
     DateTime? date,
-  }) async {
+    DailyNutritionRecord Function(DailyNutritionRecord day) change,
+  ) async {
     final uid = _requireUid;
-    final record = recordFor(date ?? DateTime.now())
-        .withEntry(FoodEntry(mealType: mealType, food: food.withNewId()));
-    await _service.saveDay(uid, record);
-    _days[record.dateKey] = record;
+    final generation = _generation;
+    final previous = recordFor(date ?? DateTime.now());
+    final record = change(previous);
+    _store(record);
     notifyListeners();
+    try {
+      await _service.saveDay(uid, record);
+    } catch (_) {
+      final stored = _days[record.dateKey];
+      final unchanged =
+          identical(stored, record) || (stored == null && record.hasNoData);
+      if (generation == _generation && unchanged) {
+        _store(previous);
+        notifyListeners();
+      }
+      rethrow;
+    }
   }
 
-  Future<void> removeEntry(String entryId, {DateTime? date}) async {
-    final uid = _requireUid;
-    final record = recordFor(date ?? DateTime.now()).withoutEntry(entryId);
-    await _service.saveDay(uid, record);
-    if (record.isEmpty) {
+  /// Guarda [record] en memoria; un día sin alimentos ni agua se quita.
+  void _store(DailyNutritionRecord record) {
+    if (record.hasNoData) {
       _days.remove(record.dateKey);
     } else {
       _days[record.dateKey] = record;
     }
+  }
+
+  // ---------------------------------------------------------------- agua
+
+  /// Suma [ml] de agua a [date] (hoy por defecto). Con un valor negativo
+  /// resta, sin bajar de 0.
+  Future<void> addWater(int ml, {DateTime? date}) =>
+      _updateWater(date, (current) => current + ml);
+
+  /// Fija el agua de [date] (hoy por defecto) en [ml].
+  Future<void> setWater(int ml, {DateTime? date}) =>
+      _updateWater(date, (_) => ml);
+
+  /// [next] recibe el agua que hay en memoria justo al aplicar el cambio
+  /// (no antes de esperar la carga), para que los toques seguidos se sumen.
+  Future<void> _updateWater(
+    DateTime? date,
+    int Function(int current) next,
+  ) async {
+    await _requireLoaded();
+    await _updateDay(
+      date,
+      (day) => day.withWater(
+        next(day.waterMl).clamp(0, AppConstants.maxWaterPerDayMl),
+      ),
+    );
+  }
+
+  /// `saveDay` reemplaza el documento del día: escribir sin haber cargado
+  /// los datos borraría los alimentos ya registrados. Solo se pueden
+  /// cambiar los días cargados (los últimos [historyDays]).
+  Future<void> _requireLoaded() async {
+    if (!_loaded) await ensureLoaded();
+    if (!_loaded) {
+      throw StateError('Los datos de alimentación todavía no se cargaron.');
+    }
+  }
+
+  /// Cambia la meta diaria de agua y la guarda en el dispositivo.
+  Future<void> updateWaterGoal(int ml) async {
+    if (ml <= 0 || ml > AppConstants.maxWaterGoalMl) return;
+    _waterGoal = ml;
     notifyListeners();
+    final uid = _waterGoalUid ?? _uid;
+    if (uid == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('water_goal_$uid', ml);
+    } catch (_) {
+      // Si no se puede guardar, la meta sigue aplicada en esta sesión.
+    }
+  }
+
+  /// Meta de agua guardada en el dispositivo, o la meta por defecto si no
+  /// hay ninguna o el almacenamiento no responde a tiempo.
+  Future<int> _readWaterGoal(String uid) async {
+    try {
+      final prefs = await SharedPreferences.getInstance().timeout(
+        const Duration(seconds: 3),
+      );
+      return prefs.getInt('water_goal_$uid') ?? AppConstants.defaultWaterGoalMl;
+    } catch (_) {
+      return AppConstants.defaultWaterGoalMl;
+    }
   }
 
   // --------------------------------------------------------- estadísticas
@@ -335,6 +502,35 @@ class NutritionProvider extends ChangeNotifier {
       compliancePercent: calorieTarget > 0
           ? (onTarget / registered.length * 100).round()
           : 0,
+    );
+  }
+
+  /// Agua de los últimos [days] días frente a la meta actual.
+  WaterStats waterStatsForLast(int days) {
+    final today = _day(DateTime.now());
+    return computeWaterStats([
+      for (var i = 0; i < days; i++)
+        recordFor(DateTime(today.year, today.month, today.day - i)),
+    ], _waterGoal);
+  }
+
+  /// Media (solo de los días con agua registrada) y días con la meta.
+  @visibleForTesting
+  static WaterStats computeWaterStats(
+    Iterable<DailyNutritionRecord> records,
+    int goalMl,
+  ) {
+    final registered = records.where((r) => r.waterMl > 0).toList();
+    if (registered.isEmpty) {
+      return (daysRegistered: 0, averageMl: 0, daysOnGoal: 0);
+    }
+    final total = registered.fold<int>(0, (sum, r) => sum + r.waterMl);
+    return (
+      daysRegistered: registered.length,
+      averageMl: (total / registered.length).round(),
+      daysOnGoal: goalMl <= 0
+          ? 0
+          : registered.where((r) => r.waterMl >= goalMl).length,
     );
   }
 

@@ -1,9 +1,11 @@
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
+import 'package:fitprogress/core/constants/app_constants.dart';
 import 'package:fitprogress/core/constants/nutrition_catalog.dart';
 import 'package:fitprogress/models/nutrition_model.dart';
 import 'package:fitprogress/providers/nutrition_provider.dart';
 import 'package:fitprogress/services/app_firebase.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 FoodItem _food(
   String name,
@@ -26,6 +28,7 @@ void main() {
   setUp(() {
     db = FakeFirebaseFirestore();
     AppFirebase.firestoreOverride = db;
+    SharedPreferences.setMockInitialValues({});
   });
 
   tearDown(() => AppFirebase.firestoreOverride = null);
@@ -115,7 +118,54 @@ void main() {
     });
   });
 
+  group('Comidas del día', () {
+    test('solo desayuno, almuerzo y cena; las antiguas se agrupan', () {
+      expect(MealType.daily, [
+        MealType.breakfast,
+        MealType.lunch,
+        MealType.dinner,
+      ]);
+      expect(MealType.midMorning.dailyGroup, MealType.breakfast);
+      expect(MealType.afternoon.dailyGroup, MealType.lunch);
+      expect(MealType.snack.dailyGroup, MealType.dinner);
+      for (final meal in MealType.daily) {
+        expect(meal.dailyGroup, meal);
+      }
+
+      FoodEntry entry(MealType type, double kcal) =>
+          FoodEntry(mealType: type, food: _food('x', kcal));
+      final day = DailyNutritionRecord(
+        date: DateTime(2026, 10, 1),
+        entries: [
+          entry(MealType.breakfast, 300),
+          entry(MealType.midMorning, 100),
+          entry(MealType.afternoon, 150),
+          entry(MealType.snack, 50),
+        ],
+      );
+      expect(day.entriesInGroup(MealType.breakfast), hasLength(2));
+      expect(day.totalsInGroup(MealType.breakfast).kcal, 400);
+      expect(day.totalsInGroup(MealType.lunch).kcal, 150);
+      expect(day.totalsInGroup(MealType.dinner).kcal, 50);
+      // Los registros antiguos conservan su tipo original.
+      expect(day.entriesFor(MealType.afternoon), hasLength(1));
+    });
+  });
+
   group('Plantillas', () {
+    test('cada objetivo del perfil sugiere una plantilla existente', () {
+      for (final goal in AppConstants.goals) {
+        expect(NutritionTemplate.forProfileGoal(goal), isNotNull, reason: goal);
+      }
+      expect(NutritionTemplate.forProfileGoal('Fuerza')!.id, 'masa-muscular');
+      expect(
+        NutritionTemplate.forProfileGoal('Perder grasa')!.id,
+        'perdida-grasa',
+      );
+      expect(NutritionTemplate.forProfileGoal(null), isNull);
+      expect(NutritionTemplate.forProfileGoal('Otro'), isNull);
+    });
+
     test('existen las cuatro plantillas con sus valores orientativos', () {
       final byGoal = {for (final t in NutritionTemplate.all) t.goal: t};
       expect(byGoal.length, 4);
@@ -346,6 +396,43 @@ void main() {
       );
     });
 
+    test(
+      'objetivo diario: crea un plan activo o actualiza el actual',
+      () async {
+        final p = provider();
+        await p.load();
+        final created = await p.setDailyGoal(
+          goal: NutritionGoals.custom,
+          calories: 2200,
+          protein: 140,
+        );
+        expect(p.plans, hasLength(1));
+        expect(p.activePlan!.id, created.id);
+        expect(p.activePlan!.name, NutritionProvider.dailyGoalPlanName);
+        expect(p.activePlan!.calories, 2200);
+
+        // Con un plan antiguo activo (con comidas), se actualiza ese mismo
+        // plan y conserva sus comidas.
+        final q = provider('u2');
+        await q.load();
+        final old = await q.useTemplate(NutritionTemplate.all.first);
+        await q.setDailyGoal(
+          goal: NutritionGoals.fatLoss,
+          calories: 1900,
+          protein: 150,
+          templateId: 'perdida-grasa',
+        );
+        expect(q.plans, hasLength(1));
+        expect(q.activePlan!.id, old.id);
+        expect(q.activePlan!.calories, 1900);
+        expect(q.activePlan!.templateId, 'perdida-grasa');
+        expect(q.activePlan!.meals, isNotEmpty);
+        final reloaded = provider('u2');
+        await reloaded.load();
+        expect(reloaded.activePlan!.protein, 150);
+      },
+    );
+
     test('reset borra los datos en memoria (cierre de sesión)', () async {
       final p = provider();
       await p.load();
@@ -355,6 +442,177 @@ void main() {
       expect(p.loaded, isFalse);
       await p.ensureLoaded();
       expect(p.plans, hasLength(1));
+    });
+  });
+
+  group('Hidratación', () {
+    String todayKey() => DailyNutritionRecord.keyOf(DateTime.now());
+
+    test('el registro diario guarda el agua y la conserva al cambiar '
+        'alimentos', () {
+      final day = DailyNutritionRecord(date: DateTime(2026, 10, 1));
+      expect(day.waterMl, 0);
+      expect(day.hasNoData, isTrue);
+
+      final withWater = day.withWater(500);
+      expect(withWater.waterMl, 500);
+      // Un día con solo agua no cuenta como día con comidas registradas.
+      expect(withWater.isEmpty, isTrue);
+      expect(withWater.hasNoData, isFalse);
+      expect(day.withWater(-200).waterMl, 0);
+
+      final entry = FoodEntry(
+        mealType: MealType.lunch,
+        food: _food('Arroz', 200),
+      );
+      final withFood = withWater.withEntry(entry);
+      expect(withFood.waterMl, 500);
+      expect(withFood.withoutEntry(entry.id).waterMl, 500);
+
+      final restored = DailyNutritionRecord.fromMap(
+        withFood.toMap(),
+        id: withFood.dateKey,
+      );
+      expect(restored.waterMl, 500);
+      expect(restored.entries, hasLength(1));
+    });
+
+    test('un registro antiguo sin el campo de agua se lee con 0 ml', () {
+      final legacy = DailyNutritionRecord.fromMap(const {
+        'dateKey': '2026-09-01',
+        'entries': [],
+      });
+      expect(legacy.waterMl, 0);
+      final damaged = DailyNutritionRecord.fromMap(const {
+        'dateKey': '2026-09-01',
+        'waterMl': 'mucha',
+      });
+      expect(damaged.waterMl, 0);
+    });
+
+    test('sumar, restar y guardar el agua de hoy', () async {
+      final p = provider();
+      await p.load();
+      await p.addWater(250);
+      await p.addWater(500);
+      expect(p.today.waterMl, 750);
+
+      final doc = await db.doc('users/u1/nutrition_days/${todayKey()}').get();
+      expect(doc.data()!['waterMl'], 750);
+
+      // Restar nunca deja un valor negativo.
+      await p.addWater(-1000);
+      expect(p.today.waterMl, 0);
+      // Sin alimentos ni agua, el documento del día se borra.
+      final deleted = await db
+          .doc('users/u1/nutrition_days/${todayKey()}')
+          .get();
+      expect(deleted.exists, isFalse);
+
+      await p.setWater(1500);
+      final reloaded = provider();
+      await reloaded.load();
+      expect(reloaded.today.waterMl, 1500);
+    });
+
+    test('toques seguidos se acumulan sin perderse', () async {
+      final p = provider();
+      await p.load();
+      await Future.wait([p.addWater(250), p.addWater(250), p.addWater(500)]);
+      expect(p.today.waterMl, 1000);
+
+      final reloaded = provider();
+      await reloaded.load();
+      expect(reloaded.today.waterMl, 1000);
+    });
+
+    test('agua y alimentos del mismo día no se pisan', () async {
+      final p = provider();
+      await p.load();
+      await Future.wait([
+        p.logFood(
+          MealType.breakfast,
+          NutritionCatalog.byName('Avena').toFood(),
+        ),
+        p.addWater(500),
+      ]);
+      await p.addWater(250);
+      expect(p.today.entries, hasLength(1));
+      expect(p.today.waterMl, 750);
+
+      // Quitar el último alimento no borra el agua del día.
+      await p.removeEntry(p.today.entries.single.id);
+      expect(p.today.waterMl, 750);
+
+      final reloaded = provider();
+      await reloaded.load();
+      expect(reloaded.today.entries, isEmpty);
+      expect(reloaded.today.waterMl, 750);
+      // Un día con solo agua no cuenta en las estadísticas de comidas.
+      expect(reloaded.statsForLast(7).daysRegistered, 0);
+    });
+
+    test(
+      'añadir agua antes de cargar no borra los alimentos del día',
+      () async {
+        final first = provider();
+        await first.load();
+        await first.logFood(
+          MealType.lunch,
+          NutritionCatalog.byName('Arroz cocido').toFood(),
+        );
+
+        final fresh = provider();
+        await fresh.addWater(250);
+        expect(fresh.today.entries, hasLength(1));
+        final doc = await db.doc('users/u1/nutrition_days/${todayKey()}').get();
+        expect(doc.data()!['entries'] as List, hasLength(1));
+        expect(doc.data()!['waterMl'], 250);
+      },
+    );
+
+    test('estadísticas de agua: media de días con registro y meta', () {
+      DailyNutritionRecord day(int d, int ml) =>
+          DailyNutritionRecord(date: DateTime(2026, 9, d), waterMl: ml);
+      final stats = NutritionProvider.computeWaterStats([
+        day(1, 2000),
+        day(2, 1000),
+        day(3, 2500),
+        day(4, 0),
+      ], 2000);
+      expect(stats.daysRegistered, 3);
+      expect(stats.averageMl, 1833);
+      expect(stats.daysOnGoal, 2);
+
+      final empty = NutritionProvider.computeWaterStats(const [], 2000);
+      expect(empty.daysRegistered, 0);
+      expect(empty.averageMl, 0);
+    });
+
+    test('la meta de agua se guarda por usuario y vuelve al cerrar '
+        'sesión', () async {
+      final ana = provider('ana');
+      await ana.load();
+      expect(ana.waterGoal, 2000);
+      await ana.updateWaterGoal(2750);
+      expect(ana.waterGoal, 2750);
+      // Valores fuera de rango se ignoran.
+      await ana.updateWaterGoal(0);
+      await ana.updateWaterGoal(50000);
+      expect(ana.waterGoal, 2750);
+
+      final anaAgain = provider('ana');
+      await anaAgain.load();
+      expect(anaAgain.waterGoal, 2750);
+
+      final bruno = provider('bruno');
+      await bruno.load();
+      expect(bruno.waterGoal, 2000);
+
+      ana.reset();
+      expect(ana.waterGoal, 2000);
+      await ana.ensureLoaded();
+      expect(ana.waterGoal, 2750);
     });
   });
 }

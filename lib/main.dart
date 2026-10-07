@@ -3,9 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 
+import 'core/constants/app_constants.dart';
 import 'core/routes/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'firebase_options.dart';
+import 'providers/achievement_binding.dart';
+import 'providers/achievement_provider.dart';
 import 'providers/auth_provider.dart';
 import 'providers/progress_provider.dart';
 import 'providers/nutrition_provider.dart';
@@ -13,6 +16,7 @@ import 'providers/schedule_provider.dart';
 import 'providers/session_cleanup.dart';
 import 'providers/theme_provider.dart';
 import 'providers/workout_provider.dart';
+import 'widgets/achievement_widgets.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -37,11 +41,13 @@ class _FitProgressAppState extends State<FitProgressApp> {
   final ProgressProvider _progressProvider = ProgressProvider();
   final ScheduleProvider _scheduleProvider = ScheduleProvider();
   final NutritionProvider _nutritionProvider = NutritionProvider();
+  final AchievementProvider _achievementProvider = AchievementProvider();
   late final ThemeProvider _themeProvider = ThemeProvider(
     initialMode: widget.initialThemeMode,
   );
   late final AppRouter _appRouter;
   late final void Function() _unbindCleanup;
+  late final void Function() _unbindAchievements;
 
   @override
   void initState() {
@@ -53,12 +59,22 @@ class _FitProgressAppState extends State<FitProgressApp> {
       progress: _progressProvider,
       schedule: _scheduleProvider,
       nutrition: _nutritionProvider,
+      achievements: _achievementProvider,
+    );
+    _unbindAchievements = bindAchievements(
+      achievements: _achievementProvider,
+      auth: _authProvider,
+      progress: _progressProvider,
+      schedule: _scheduleProvider,
+      nutrition: _nutritionProvider,
     );
   }
 
   @override
   void dispose() {
     _unbindCleanup();
+    _unbindAchievements();
+    _achievementProvider.dispose();
     _authProvider.dispose();
     _workoutProvider.dispose();
     _progressProvider.dispose();
@@ -77,11 +93,12 @@ class _FitProgressAppState extends State<FitProgressApp> {
         ChangeNotifierProvider.value(value: _progressProvider),
         ChangeNotifierProvider.value(value: _scheduleProvider),
         ChangeNotifierProvider.value(value: _nutritionProvider),
+        ChangeNotifierProvider.value(value: _achievementProvider),
         ChangeNotifierProvider.value(value: _themeProvider),
       ],
       child: Consumer<ThemeProvider>(
         builder: (context, theme, _) => MaterialApp.router(
-          title: 'FitProgress',
+          title: AppConstants.appName,
           theme: AppTheme.light,
           darkTheme: AppTheme.dark,
           themeMode: theme.mode,
@@ -94,6 +111,11 @@ class _FitProgressAppState extends State<FitProgressApp> {
             GlobalCupertinoLocalizations.delegate,
           ],
           routerConfig: _appRouter.router,
+          // Aviso global de logros nuevos, sobre cualquier pantalla.
+          builder: (context, child) => AchievementAnnouncer(
+            onOpen: () => _appRouter.router.push(AppRoutes.logros),
+            child: child ?? const SizedBox.shrink(),
+          ),
         ),
       ),
     );

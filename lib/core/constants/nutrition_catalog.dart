@@ -448,4 +448,22 @@ class NutritionTemplate {
     }
     return null;
   }
+
+  /// Plantilla que encaja con cada objetivo del perfil
+  /// (`AppConstants.goals`). Es solo una sugerencia de por dónde empezar,
+  /// no una recomendación personalizada.
+  static const Map<String, String> profileGoalTemplates = {
+    'Ganar músculo': 'masa-muscular',
+    'Fuerza': 'masa-muscular',
+    'Perder grasa': 'perdida-grasa',
+    'Mantenimiento': 'mantenimiento',
+    'Resistencia': 'equilibrada',
+    'Salud general': 'equilibrada',
+  };
+
+  /// Plantilla sugerida para el objetivo del perfil, o `null`.
+  static NutritionTemplate? forProfileGoal(String? goal) {
+    final id = goal == null ? null : profileGoalTemplates[goal];
+    return id == null ? null : byId(id);
+  }
 }

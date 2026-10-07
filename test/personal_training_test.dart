@@ -6,11 +6,14 @@ import 'package:fitprogress/models/scheduled_workout_model.dart';
 import 'package:fitprogress/models/workout_model.dart';
 import 'package:fitprogress/models/workout_set_model.dart';
 import 'package:fitprogress/providers/progress_provider.dart';
+import 'package:fitprogress/screens/main/main_shell.dart';
 import 'package:fitprogress/providers/schedule_provider.dart';
 import 'package:fitprogress/providers/workout_provider.dart';
 import 'package:fitprogress/services/app_firebase.dart';
 import 'package:fitprogress/services/firestore_service.dart';
+import 'package:fitprogress/widgets/week_strip.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 const _uid = 'u1';
@@ -436,6 +439,41 @@ void main() {
         item.isCompletedBy([_session('d', DateTime(2026, 10, 5))]),
         isTrue,
       );
+    });
+  });
+
+  group('Navegación y calendario semanal', () {
+    test('las pantallas sin pestaña marcan su pestaña madre', () {
+      expect(MainShell.parentTab(ShellBranch.hoy), ShellBranch.hoy);
+      expect(MainShell.parentTab(ShellBranch.perfil), ShellBranch.perfil);
+      expect(
+        MainShell.parentTab(ShellBranch.entrenamiento),
+        ShellBranch.entrenar,
+      );
+      expect(MainShell.parentTab(ShellBranch.ejercicios), ShellBranch.entrenar);
+      expect(MainShell.parentTab(ShellBranch.calendario), ShellBranch.hoy);
+    });
+
+    test('lunes de la semana y rótulo del rango', () async {
+      await initializeDateFormatting('es');
+      // Miércoles 7 de octubre de 2026 → lunes 5.
+      expect(
+        WeekStrip.mondayOf(DateTime(2026, 10, 7, 18)),
+        DateTime(2026, 10, 5),
+      );
+      // Un lunes es su propio lunes; un domingo pertenece a la semana anterior.
+      expect(WeekStrip.mondayOf(DateTime(2026, 10, 5)), DateTime(2026, 10, 5));
+      expect(WeekStrip.mondayOf(DateTime(2026, 10, 11)), DateTime(2026, 10, 5));
+      // Cruza de año.
+      expect(WeekStrip.mondayOf(DateTime(2026, 1, 1)), DateTime(2025, 12, 29));
+
+      expect(
+        WeekStrip.rangeLabel(DateTime(2026, 10, 5)),
+        startsWith('5 – 11 '),
+      );
+      final crossing = WeekStrip.rangeLabel(DateTime(2026, 9, 28));
+      expect(crossing, startsWith('28 '));
+      expect(crossing, contains('– 4 '));
     });
   });
 }

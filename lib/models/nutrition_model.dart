@@ -37,6 +37,18 @@ enum MealType {
 
   final String label;
 
+  /// Comidas que se registran en Comida: solo desayuno, almuerzo y cena.
+  /// Las demás se conservan para leer registros y planes antiguos.
+  static const List<MealType> daily = [breakfast, lunch, dinner];
+
+  /// Comida de [daily] en la que se muestra un registro: media mañana con
+  /// el desayuno, merienda con el almuerzo y snack con la cena.
+  MealType get dailyGroup => switch (this) {
+    breakfast || midMorning => breakfast,
+    lunch || afternoon => lunch,
+    dinner || snack => dinner,
+  };
+
   static MealType fromName(String? name) => MealType.values.firstWhere(
     (m) => m.name == name,
     orElse: () => MealType.snack,
@@ -431,19 +443,26 @@ class FoodEntry {
   );
 }
 
-/// Lo que el usuario consumió realmente en un día (distinto del plan).
+/// Lo que el usuario consumió realmente en un día (distinto del plan):
+/// alimentos registrados y agua bebida.
 class DailyNutritionRecord {
   DailyNutritionRecord({
     required DateTime date,
     List<FoodEntry> entries = const [],
+    int waterMl = 0,
   }) : _date = DateTime(date.year, date.month, date.day),
-       _entries = List.unmodifiable(entries);
+       _entries = List.unmodifiable(entries),
+       _waterMl = waterMl < 0 ? 0 : waterMl;
 
   final DateTime _date;
   final List<FoodEntry> _entries;
+  final int _waterMl;
 
   DateTime get date => _date;
   List<FoodEntry> get entries => _entries;
+
+  /// Agua bebida en el día, en mililitros.
+  int get waterMl => _waterMl;
 
   /// Identificador del documento: "2026-10-01".
   String get dateKey => keyOf(_date);
@@ -456,7 +475,12 @@ class DailyNutritionRecord {
   NutritionTotals get totals =>
       NutritionTotals.sum(_entries.map((e) => e.food.totals));
 
+  /// Sin alimentos registrados. El agua no cuenta: un día con solo agua no
+  /// es un día registrado en las estadísticas de comidas.
   bool get isEmpty => _entries.isEmpty;
+
+  /// Sin alimentos ni agua: el documento del día se puede borrar.
+  bool get hasNoData => _entries.isEmpty && _waterMl <= 0;
 
   List<FoodEntry> entriesFor(MealType type) => [
     for (final e in _entries)
@@ -466,8 +490,21 @@ class DailyNutritionRecord {
   NutritionTotals totalsFor(MealType type) =>
       NutritionTotals.sum(entriesFor(type).map((e) => e.food.totals));
 
-  DailyNutritionRecord withEntry(FoodEntry entry) =>
-      DailyNutritionRecord(date: _date, entries: [..._entries, entry]);
+  /// Registros que se muestran en la comida [group] (de [MealType.daily]),
+  /// incluidos los de comidas antiguas que se agrupan en ella.
+  List<FoodEntry> entriesInGroup(MealType group) => [
+    for (final e in _entries)
+      if (e.mealType.dailyGroup == group) e,
+  ];
+
+  NutritionTotals totalsInGroup(MealType group) =>
+      NutritionTotals.sum(entriesInGroup(group).map((e) => e.food.totals));
+
+  DailyNutritionRecord withEntry(FoodEntry entry) => DailyNutritionRecord(
+    date: _date,
+    entries: [..._entries, entry],
+    waterMl: _waterMl,
+  );
 
   DailyNutritionRecord withoutEntry(String entryId) => DailyNutritionRecord(
     date: _date,
@@ -475,13 +512,19 @@ class DailyNutritionRecord {
       for (final e in _entries)
         if (e.id != entryId) e,
     ],
+    waterMl: _waterMl,
   );
+
+  /// Copia con [waterMl] mililitros de agua (nunca negativo).
+  DailyNutritionRecord withWater(int waterMl) =>
+      DailyNutritionRecord(date: _date, entries: _entries, waterMl: waterMl);
 
   Map<String, dynamic> toMap() => {
     'date': _date,
     'dateKey': dateKey,
     'entries': [for (final e in _entries) e.toMap()],
     'kcal': totals.kcal,
+    'waterMl': _waterMl,
     'updatedAt': DateTime.now(),
   };
 
@@ -496,6 +539,8 @@ class DailyNutritionRecord {
     return DailyNutritionRecord(
       date: date,
       entries: parseMapList(map['entries'], FoodEntry.fromMap),
+      // Los registros anteriores a la hidratación no tienen el campo: 0 ml.
+      waterMl: map['waterMl'] is num ? (map['waterMl'] as num).round() : 0,
     );
   }
 }

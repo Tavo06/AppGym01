@@ -19,6 +19,7 @@ class CustomTextField extends StatefulWidget {
     this.onTap,
     this.suffixWidget,
     this.textCapitalization = TextCapitalization.none,
+    this.prefixText,
   });
 
   final TextEditingController? controller;
@@ -37,6 +38,9 @@ class CustomTextField extends StatefulWidget {
   final VoidCallback? onTap;
   final Widget? suffixWidget;
   final TextCapitalization textCapitalization;
+
+  /// Texto fijo delante del valor (p. ej. el código de país `+51 `).
+  final String? prefixText;
 
   @override
   State<CustomTextField> createState() => _CustomTextFieldState();
@@ -64,6 +68,7 @@ class _CustomTextFieldState extends State<CustomTextField> {
         labelText: widget.label,
         hintText: widget.hint,
         prefixIcon: widget.icon == null ? null : Icon(widget.icon),
+        prefixText: widget.prefixText,
         suffixIcon: widget.showObscureToggle
             ? IconButton(
                 icon: Icon(

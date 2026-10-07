@@ -23,6 +23,56 @@ class Validators {
     return null;
   }
 
+  /// Formato internacional E.164: `+`, código de país y número (8–15 cifras).
+  static final RegExp _phoneRegExp = RegExp(r'^\+[1-9]\d{7,14}$');
+
+  /// Celular peruano escrito sin código de país: 9 dígitos que empiezan
+  /// por 9.
+  static final RegExp _localPhoneRegExp = RegExp(r'^9\d{8}$');
+
+  static String _cleanPhone(String? value) =>
+      (value ?? '').replaceAll(RegExp(r'[\s\-().]'), '');
+
+  /// Devuelve el teléfono en E.164, el formato que exige Firebase Auth.
+  /// Quita espacios, guiones, puntos y paréntesis y, si se escribió sin
+  /// `+`, añade el código de país por defecto: `987 654 321` →
+  /// `+51987654321`. Un número con `+` se respeta tal cual.
+  static String normalizePhone(String? value) {
+    final phone = _cleanPhone(value);
+    if (phone.isEmpty || phone.startsWith('+')) return phone;
+    return '${AppConstants.defaultPhoneCountryCode}$phone';
+  }
+
+  /// Parte local de un teléfono guardado, para mostrarla en el campo junto
+  /// al prefijo fijo: `+51987654321` → `987654321`.
+  static String localPhone(String? value) {
+    final phone = _cleanPhone(value);
+    const code = AppConstants.defaultPhoneCountryCode;
+    return phone.startsWith(code) ? phone.substring(code.length) : phone;
+  }
+
+  static String? validatePhone(String? value, {bool required = true}) {
+    final phone = _cleanPhone(value);
+    if (phone.isEmpty) return required ? 'Ingresa tu celular.' : null;
+    if (!phone.startsWith('+')) {
+      if (!_localPhoneRegExp.hasMatch(phone)) {
+        return 'Ingresa los 9 dígitos de tu celular (empieza con 9).';
+      }
+      return null;
+    }
+    if (!_phoneRegExp.hasMatch(phone)) return 'Ingresa un teléfono válido.';
+    return null;
+  }
+
+  static String? validateSmsCode(String? value) {
+    final code = value?.trim() ?? '';
+    if (code.isEmpty) return 'Ingresa el código que recibiste.';
+    if (!RegExp(r'^\d{6}$').hasMatch(code)) {
+      return 'El código tiene 6 dígitos.';
+    }
+    return null;
+  }
+
   static String? validateRequired(String? value, {String? message}) {
     if (value == null || value.trim().isEmpty) {
       return message ?? 'Este campo es obligatorio.';

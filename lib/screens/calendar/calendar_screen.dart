@@ -5,11 +5,12 @@ import 'package:provider/provider.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
-import '../../models/exercise_model.dart';
+import '../../models/nutrition_model.dart';
 import '../../models/routine_day_model.dart';
 import '../../models/routine_model.dart';
 import '../../models/scheduled_workout_model.dart';
 import '../../models/workout_model.dart';
+import '../../providers/nutrition_provider.dart';
 import '../../providers/progress_provider.dart';
 import '../../providers/schedule_provider.dart';
 import '../../providers/workout_provider.dart';
@@ -19,33 +20,58 @@ import '../../widgets/confirmation_dialog.dart';
 import '../../widgets/custom_button.dart';
 import '../../widgets/month_calendar.dart';
 import '../../widgets/responsive.dart';
+import '../../widgets/scheduled_workout_starter.dart';
+import '../../widgets/tab_back_button.dart';
+import '../../widgets/week_strip.dart';
+import '../../widgets/day_nutrition_summary.dart';
 import '../../widgets/workout_card.dart';
 
-/// Mi calendario (`/calendario`): días entrenados (de ProgressProvider) y
-/// entrenamientos programados (de ScheduleProvider).
+/// Mi calendario (`/calendario`), por semanas: días entrenados (de
+/// ProgressProvider), entrenamientos programados (de ScheduleProvider) y
+/// alimentación (de NutritionProvider).
 class CalendarScreen extends StatefulWidget {
-  const CalendarScreen({super.key});
+  const CalendarScreen({super.key, this.initialDay});
+
+  /// Día que se muestra al abrir (por ejemplo, el tocado en "Hoy").
+  final DateTime? initialDay;
 
   @override
   State<CalendarScreen> createState() => _CalendarScreenState();
 }
 
 class _CalendarScreenState extends State<CalendarScreen> {
-  late DateTime _month;
+  /// Lunes de la semana visible.
+  late DateTime _week;
   late DateTime _selected;
+
+  void _select(DateTime day) {
+    _selected = DateTime(day.year, day.month, day.day);
+    _week = WeekStrip.mondayOf(_selected);
+  }
+
+  @override
+  void didUpdateWidget(CalendarScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // La pestaña conserva su estado: un día nuevo recibido por `extra` se
+    // aplica aquí.
+    final day = widget.initialDay;
+    if (day != null && day != oldWidget.initialDay) {
+      setState(() => _select(day));
+    }
+  }
 
   @override
   void initState() {
     super.initState();
-    final now = DateTime.now();
-    _month = DateTime(now.year, now.month);
-    _selected = DateTime(now.year, now.month, now.day);
+    _select(widget.initialDay ?? DateTime.now());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final progress = context.read<ProgressProvider>();
       if (!progress.hasData && !progress.loading) progress.refresh();
       final schedule = context.read<ScheduleProvider>();
       if (!schedule.loaded && !schedule.loading) schedule.load();
+      // Para marcar los días con comida registrada o meta de agua cumplida.
+      context.read<NutritionProvider>().ensureLoaded();
     });
   }
 
@@ -53,29 +79,19 @@ class _CalendarScreenState extends State<CalendarScreen> {
     await Future.wait([
       context.read<ProgressProvider>().refresh(),
       context.read<ScheduleProvider>().load(),
+      context.read<NutritionProvider>().load(),
     ]);
   }
 
   Map<DateTime, DayMarkers> _markers(
     ProgressProvider progress,
     ScheduleProvider schedule,
-  ) {
-    final days = {...progress.trainedDays, ...schedule.scheduledDays};
-    return {
-      for (final day in days)
-        day: () {
-          final sessions = progress.sessionsOn(day);
-          final planned = schedule.forDay(day);
-          return DayMarkers(
-            trained: sessions.isNotEmpty,
-            scheduled: planned.length,
-            scheduledDone: planned
-                .where((p) => p.isCompletedBy(sessions))
-                .length,
-          );
-        }(),
-    };
-  }
+    NutritionProvider nutrition,
+  ) => dayMarkersFor(
+    progress: progress,
+    schedule: schedule,
+    nutrition: nutrition,
+  );
 
   Future<void> _openScheduleSheet() async {
     final created = await showModalBottomSheet<int>(
@@ -95,64 +111,10 @@ class _CalendarScreenState extends State<CalendarScreen> {
   }
 
   /// Entrena un día programado: la rutina viaja como objeto a
-  /// `/entrenamiento`, igual que desde Rutinas.
-  Future<void> _train(ScheduledWorkout item) async {
-    final workout = context.read<WorkoutProvider>();
-    final uid = workout.userId;
-    if (uid == null) return;
-    final firestore = FirestoreService();
-    try {
-      final results = await Future.wait([
-        firestore.getRoutines(uid),
-        firestore.getExercises(uid),
-      ]);
-      if (!mounted) return;
-      final routines = (results[0] as List).cast<WorkoutRoutine>();
-      final exercises = (results[1] as List).cast<ExerciseModel>();
-      WorkoutRoutine? routine;
-      for (final r in routines) {
-        if (r.id == item.routineId) routine = r.withExercises(exercises);
-      }
-      if (routine == null) {
-        showAppMessage(context, 'Esa rutina ya no existe.');
-        return;
-      }
-      final day =
-          routine.dayById(item.dayId) ??
-          (routine.days.isNotEmpty ? routine.days.first : null);
-      final toStart = day == null ? routine : routine.forDay(day);
-      if (toStart.exerciseDetails.isEmpty) {
-        showAppMessage(
-          context,
-          'Los ejercicios de esa rutina ya no existen. Edítala para '
-          'seleccionar otros.',
-        );
-        return;
-      }
-      if (workout.active) {
-        final replace = await ConfirmationDialog.show(
-          context,
-          icon: Icons.warning_amber_rounded,
-          title: 'Ya tienes un entrenamiento en curso',
-          message:
-              'Si comienzas "${toStart.name}", el entrenamiento actual se '
-              'descartará.',
-          confirmLabel: 'Descartar y comenzar',
-          cancelLabel: 'Seguir con el actual',
-          destructive: true,
-        );
-        if (!mounted) return;
-        if (replace != true) {
-          context.go('/entrenamiento');
-          return;
-        }
-      }
-      context.go('/entrenamiento', extra: toStart);
-    } catch (error) {
-      if (!mounted) return;
-      showAppMessage(context, ProgressProvider.describeError(error));
-    }
-  }
+  /// `/entrenamiento`, igual que desde Rutinas (lógica compartida con el
+  /// Panel en `startScheduledWorkout`).
+  Future<void> _train(ScheduledWorkout item) =>
+      startScheduledWorkout(context, item);
 
   Future<void> _remove(ScheduledWorkout item) async {
     final confirmed = await ConfirmationDialog.show(
@@ -176,17 +138,12 @@ class _CalendarScreenState extends State<CalendarScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Mi calendario'),
+        title: const Text('Mi semana'),
         automaticallyImplyLeading: false,
+        leading: const TabBackButton(to: '/hoy', tooltip: 'Ir a Hoy'),
         actions: [
           TextButton.icon(
-            onPressed: () {
-              final now = DateTime.now();
-              setState(() {
-                _month = DateTime(now.year, now.month);
-                _selected = DateTime(now.year, now.month, now.day);
-              });
-            },
+            onPressed: () => setState(() => _select(DateTime.now())),
             icon: const Icon(Icons.today_rounded, size: 20),
             label: const Text('Hoy'),
           ),
@@ -204,28 +161,39 @@ class _CalendarScreenState extends State<CalendarScreen> {
         label: const Text('Programar'),
       ),
       // Se reconstruye con cada notifyListeners de ProgressProvider (nuevas
-      // sesiones) y de ScheduleProvider (lo programado).
-      body: Consumer2<ProgressProvider, ScheduleProvider>(
-        builder: (context, progress, schedule, _) {
-          final markers = _markers(progress, schedule);
+      // sesiones), de ScheduleProvider (lo programado) y de
+      // NutritionProvider (comida y agua de cada día).
+      body: Consumer3<ProgressProvider, ScheduleProvider, NutritionProvider>(
+        builder: (context, progress, schedule, nutrition, _) {
+          final markers = _markers(progress, schedule, nutrition);
+          final record = nutrition.loaded
+              ? nutrition.recordFor(_selected)
+              : null;
           final calendar = Card(
             margin: EdgeInsets.zero,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(10, 10, 10, 16),
-              child: MonthCalendar(
-                month: _month,
+              padding: const EdgeInsets.fromLTRB(14, 8, 8, 16),
+              child: WeekStrip(
+                week: _week,
                 selectedDay: _selected,
                 markers: markers,
-                onMonthChanged: (month) => setState(() => _month = month),
-                onDaySelected: (day) => setState(() {
-                  _selected = day;
-                  _month = DateTime(day.year, day.month);
-                }),
+                showLegend: true,
+                // Al cambiar de semana se elige el mismo día de la semana.
+                onWeekChanged: (monday) => setState(
+                  () => _select(
+                    DateTime(
+                      monday.year,
+                      monday.month,
+                      monday.day + _selected.weekday - 1,
+                    ),
+                  ),
+                ),
+                onDaySelected: (day) => setState(() => _select(day)),
               ),
             ),
           );
-          final summary = _MonthSummary(
-            month: _month,
+          final summary = _WeekSummary(
+            monday: _week,
             markers: markers,
             streak: progress.dayStreak,
           );
@@ -233,6 +201,13 @@ class _CalendarScreenState extends State<CalendarScreen> {
             day: _selected,
             sessions: progress.sessionsOn(_selected),
             scheduled: schedule.forDay(_selected),
+            nutrition: record == null || record.hasNoData
+                ? null
+                : _DayNutrition(
+                    record: record,
+                    calorieTarget: nutrition.activePlan?.calories ?? 0,
+                    waterGoal: nutrition.waterGoal,
+                  ),
             onTrain: _train,
             onRemove: _remove,
             onSchedule: _openScheduleSheet,
@@ -302,26 +277,27 @@ class _CalendarScreenState extends State<CalendarScreen> {
   }
 }
 
-class _MonthSummary extends StatelessWidget {
-  const _MonthSummary({
-    required this.month,
+/// Resumen de la semana visible: días entrenados, programados cumplidos y
+/// racha actual.
+class _WeekSummary extends StatelessWidget {
+  const _WeekSummary({
+    required this.monday,
     required this.markers,
     required this.streak,
   });
 
-  final DateTime month;
+  final DateTime monday;
   final Map<DateTime, DayMarkers> markers;
   final int streak;
 
   @override
   Widget build(BuildContext context) {
+    final end = DateTime(monday.year, monday.month, monday.day + 7);
     var trained = 0;
     var scheduled = 0;
     var done = 0;
     for (final entry in markers.entries) {
-      if (entry.key.year != month.year || entry.key.month != month.month) {
-        continue;
-      }
+      if (entry.key.isBefore(monday) || !entry.key.isBefore(end)) continue;
       if (entry.value.trained) trained++;
       scheduled += entry.value.scheduled;
       done += entry.value.scheduledDone;
@@ -413,11 +389,15 @@ class _DayPanel extends StatelessWidget {
     required this.onTrain,
     required this.onRemove,
     required this.onSchedule,
+    this.nutrition,
   });
 
   final DateTime day;
   final List<WorkoutSession> sessions;
   final List<ScheduledWorkout> scheduled;
+
+  /// Comida y agua del día (solo si hay algo registrado).
+  final Widget? nutrition;
   final ValueChanged<ScheduledWorkout> onTrain;
   final ValueChanged<ScheduledWorkout> onRemove;
   final VoidCallback onSchedule;
@@ -498,6 +478,11 @@ class _DayPanel extends StatelessWidget {
               child: WorkoutCard(session: session),
             ),
         ],
+        if (nutrition != null) ...[
+          if (sessions.isEmpty && scheduled.isEmpty) const SizedBox(height: 16),
+          _label(context, 'Alimentación'),
+          nutrition!,
+        ],
       ],
     );
   }
@@ -514,6 +499,46 @@ class _DayPanel extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// Calorías y agua registradas en el día elegido.
+class _DayNutrition extends StatelessWidget {
+  const _DayNutrition({
+    required this.record,
+    required this.calorieTarget,
+    required this.waterGoal,
+  });
+
+  final DailyNutritionRecord record;
+  final double calorieTarget;
+  final int waterGoal;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            DayNutritionSummary(
+              record: record,
+              calorieTarget: calorieTarget,
+              waterGoal: waterGoal,
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () => context.go('/alimentacion'),
+                child: const Text('Ver alimentación'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _ScheduledTile extends StatelessWidget {

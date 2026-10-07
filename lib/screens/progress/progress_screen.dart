@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/routes/app_router.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
@@ -40,6 +41,15 @@ class _ProgressScreenState extends State<ProgressScreen> {
       appBar: AppBar(
         title: const Text('Progreso'),
         automaticallyImplyLeading: false,
+        actions: [
+          // Los logros forman parte de Progreso en la nueva navegación.
+          TextButton.icon(
+            onPressed: () => context.push(AppRoutes.logros),
+            icon: const Icon(Icons.emoji_events_rounded, size: 20),
+            label: const Text('Logros'),
+          ),
+          const SizedBox(width: 8),
+        ],
       ),
       // Panel de estadísticas: se reconstruye cada vez que ProgressProvider
       // llama a notifyListeners() (por ejemplo, al guardar un entrenamiento).
@@ -1093,10 +1103,10 @@ class _PersonalRecords extends StatelessWidget {
                         Text(
                           '${Formatters.formatWeight(record.maxWeight)} kg '
                           '× ${record.reps}',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w800,
-                            color: AppColors.primary,
+                            color: context.palette.primaryText,
                           ),
                         ),
                       ],

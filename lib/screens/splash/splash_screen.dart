@@ -49,7 +49,7 @@ class _SplashScreenState extends State<SplashScreen> {
       if (!mounted) return;
     }
 
-    context.go(authProvider.isEmailVerified ? '/rutinas' : '/verify-email');
+    context.go(authProvider.isAccountVerified ? '/hoy' : '/verify-email');
   }
 
   @override

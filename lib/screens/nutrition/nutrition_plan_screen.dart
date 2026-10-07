@@ -254,10 +254,10 @@ class _PlanSummary extends StatelessWidget {
                 Expanded(
                   child: Text(
                     plan.goal,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
-                      color: AppColors.primary,
+                      color: context.palette.primaryText,
                     ),
                   ),
                 ),

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:firebase_auth/firebase_auth.dart';
@@ -28,8 +29,37 @@ class RegisterResult {
       RegisterResult(user: user, setupSecret: setupSecret, profileError: error);
 }
 
+/// Resultado de pedir el código SMS para vincular un teléfono.
+class PhoneCodeRequest {
+  const PhoneCodeRequest({
+    this.verificationId,
+    this.resendToken,
+    this.autoVerified = false,
+  });
+
+  /// Identificador con el que se confirma el código (móvil). En web es
+  /// `null`: la confirmación la guarda el propio [AuthService].
+  final String? verificationId;
+
+  /// Permite reenviar el SMS sin volver a pasar el control anti-abuso.
+  final int? resendToken;
+
+  /// `true` si Android leyó el SMS solo y el teléfono ya quedó vinculado.
+  final bool autoVerified;
+}
+
 class AuthService {
   final FirebaseAuth _auth = AppFirebase.auth;
+
+  /// Confirmación pendiente de `linkWithPhoneNumber` (solo web).
+  ConfirmationResult? _webPhoneLink;
+
+  /// Firebase Auth solo verifica teléfonos en Android, iOS y web (en web,
+  /// con reCAPTCHA invisible). En Windows no está disponible.
+  static bool get phoneSupported =>
+      kIsWeb ||
+      defaultTargetPlatform == TargetPlatform.android ||
+      defaultTargetPlatform == TargetPlatform.iOS;
 
   Stream<User?> get authStateChanges => _auth.authStateChanges();
 
@@ -87,6 +117,89 @@ class AuthService {
     await user.sendEmailVerification();
   }
 
+  /// Envía un SMS para VINCULAR [phone] a la cuenta con sesión. No inicia
+  /// sesión con el teléfono: eso crearía una segunda cuenta con otro `uid`.
+  Future<PhoneCodeRequest> startPhoneLink(
+    String phone, {
+    int? resendToken,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      throw FirebaseAuthException(
+        code: 'no-current-user',
+        message: 'No hay una sesión activa.',
+      );
+    }
+    if (kIsWeb) {
+      _webPhoneLink = await user.linkWithPhoneNumber(phone);
+      return const PhoneCodeRequest();
+    }
+    final completer = Completer<PhoneCodeRequest>();
+    await _auth.verifyPhoneNumber(
+      phoneNumber: phone,
+      forceResendingToken: resendToken,
+      timeout: const Duration(seconds: 60),
+      verificationCompleted: (credential) async {
+        // Android leyó el SMS por su cuenta: se vincula directamente.
+        try {
+          await user.linkWithCredential(credential);
+          if (!completer.isCompleted) {
+            completer.complete(const PhoneCodeRequest(autoVerified: true));
+          }
+        } catch (error) {
+          if (!completer.isCompleted) completer.completeError(error);
+        }
+      },
+      verificationFailed: (error) {
+        if (!completer.isCompleted) completer.completeError(error);
+      },
+      codeSent: (verificationId, token) {
+        if (!completer.isCompleted) {
+          completer.complete(
+            PhoneCodeRequest(
+              verificationId: verificationId,
+              resendToken: token,
+            ),
+          );
+        }
+      },
+      codeAutoRetrievalTimeout: (_) {},
+    );
+    return completer.future;
+  }
+
+  /// Confirma el código SMS y vincula el teléfono a la cuenta actual.
+  Future<void> confirmPhoneLink({
+    String? verificationId,
+    required String smsCode,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      throw FirebaseAuthException(
+        code: 'no-current-user',
+        message: 'No hay una sesión activa.',
+      );
+    }
+    if (kIsWeb) {
+      final pending = _webPhoneLink;
+      if (pending == null) {
+        throw FirebaseAuthException(code: 'session-expired', message: '');
+      }
+      await pending.confirm(smsCode);
+      _webPhoneLink = null;
+      return;
+    }
+    if (verificationId == null) {
+      throw FirebaseAuthException(code: 'session-expired', message: '');
+    }
+    await user.linkWithCredential(
+      PhoneAuthProvider.credential(
+        verificationId: verificationId,
+        smsCode: smsCode,
+      ),
+    );
+  }
+
   Future<void> sendPasswordResetEmail(String email) async {
     await _auth.sendPasswordResetEmail(email: email.trim());
   }
@@ -116,6 +229,28 @@ class AuthService {
     }
     await user.reload();
     return _auth.currentUser!;
+  }
+
+  /// Vuelve a leer el usuario y dice si su correo está verificado.
+  ///
+  /// `reload()` no siempre actualiza `emailVerified` (en escritorio, por
+  /// ejemplo, el usuario seguía "sin verificar" después de abrir el enlace
+  /// del correo). Si no lo hace, se renueva el token: su claim
+  /// `email_verified` lo emite el servidor y sí refleja la verificación.
+  Future<({User user, bool emailVerified})> reloadEmailVerification() async {
+    final user = await reloadUser();
+    if (user.emailVerified) return (user: user, emailVerified: true);
+    try {
+      final token = await user.getIdTokenResult(true);
+      final claim = token.claims?['email_verified'] == true;
+      // Con el token renovado, una segunda recarga suele traer ya el dato.
+      if (claim) await user.reload();
+      final fresh = _auth.currentUser ?? user;
+      return (user: fresh, emailVerified: fresh.emailVerified || claim);
+    } catch (error) {
+      debugPrint('No se pudo renovar el token: $error');
+      return (user: user, emailVerified: false);
+    }
   }
 
   Future<void> updateDisplayName(String name) async {
@@ -192,6 +327,36 @@ class AuthErrorMapper {
 
   static const String genericMessage = 'Ocurrió un error. Intenta nuevamente.';
 
+  /// Mensaje para los errores al enviar o confirmar el código SMS. Algunos
+  /// códigos significan otra cosa que en el registro con correo: por
+  /// ejemplo, `operation-not-allowed` al enviar un SMS indica que la región
+  /// del número no está permitida (o que el proveedor Teléfono está
+  /// desactivado), no que falte el método de correo y contraseña.
+  static String phoneMessage(Object? error) {
+    if (error is FirebaseAuthException) {
+      debugPrint(
+        'Error de verificación por SMS: ${error.code} ${error.message}',
+      );
+      switch (error.code) {
+        case 'operation-not-allowed':
+          return 'Firebase no permite enviar SMS a este número. Revisa que '
+              'el proveedor Teléfono esté habilitado y que la región del '
+              'número esté permitida (Authentication > Configuración > '
+              'Política de la región de SMS).';
+        case 'too-many-requests':
+          return 'Demasiados intentos con este número. Espera unos minutos '
+              'e inténtalo de nuevo.';
+        case 'billing-not-enabled':
+          return 'El envío de SMS requiere que el proyecto de Firebase tenga '
+              'la facturación activada (plan Blaze).';
+      }
+      final friendly = friendlyMessage(error);
+      if (friendly != genericMessage) return friendly;
+      return 'No se pudo verificar el teléfono (${error.code}).';
+    }
+    return friendlyMessage(error);
+  }
+
   static String friendlyMessage(Object? error) {
     if (error is FirebaseAuthException) {
       switch (error.code) {
@@ -229,7 +394,32 @@ class AuthErrorMapper {
         case 'provider-already-linked':
           return 'La cuenta ya está vinculada.';
         case 'credential-already-in-use':
+          // Al vincular un teléfono, la credencial en uso es ese número.
+          if (error.credential is PhoneAuthCredential) {
+            return 'Este teléfono ya está asociado a otra cuenta.';
+          }
           return 'Ya existe una cuenta con este correo.';
+        case 'invalid-phone-number':
+          return 'El número de teléfono no es válido. Revisa los 9 dígitos '
+              'de tu celular.';
+        case 'missing-phone-number':
+          return 'Ingresa tu teléfono.';
+        case 'invalid-verification-code':
+          return 'El código no es correcto. Revisa el SMS e inténtalo de '
+              'nuevo.';
+        case 'invalid-verification-id':
+        case 'session-expired':
+        case 'code-expired':
+          return 'El código caducó. Pide uno nuevo.';
+        case 'quota-exceeded':
+          return 'Se alcanzó el límite de SMS. Intenta más tarde.';
+        case 'captcha-check-failed':
+          return 'No se pudo comprobar el reCAPTCHA. Recarga la página e '
+              'inténtalo de nuevo.';
+        case 'app-not-authorized':
+        case 'missing-client-identifier':
+          return 'La app no está autorizada para enviar SMS (revisa las '
+              'huellas SHA-1/SHA-256 en Firebase).';
         case 'popup-blocked':
           return 'El navegador bloqueó la ventana de Google. Permite las '
               'ventanas emergentes para este sitio e intenta de nuevo.';

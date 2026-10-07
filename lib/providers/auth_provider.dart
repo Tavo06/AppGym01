@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
+import '../core/utils/validators.dart';
 import '../models/user_model.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
@@ -28,6 +29,14 @@ class AuthProvider extends ChangeNotifier {
   bool _passwordConfirmed = false;
   String? _loginEmail;
 
+  // `uid` cuyo teléfono se vinculó en esta sesión. Respaldo por si
+  // `reload()` aún no refleja el proveedor `phone` recién vinculado.
+  String? _phoneLinkedUid;
+
+  /// Usuario cuyo correo confirmó el servidor (claim `email_verified` del
+  /// token) aunque `User.emailVerified` siguiera en `false` tras `reload()`.
+  String? _emailVerifiedUid;
+
   AuthProvider() {
     _subscriptions.add(
       _authService.authStateChanges.listen(_onAuthStateChanged),
@@ -49,7 +58,11 @@ class AuthProvider extends ChangeNotifier {
   /// registro termina y navega a `/verify-email`. Mientras tanto el router
   /// no debe sacar al usuario de `/register`.
   bool get registering => _registering;
-  bool get isEmailVerified => _user?.emailVerified ?? false;
+  bool get isEmailVerified {
+    final current = _user;
+    if (current == null) return false;
+    return current.emailVerified || _emailVerifiedUid == current.uid;
+  }
 
   /// `true` si la cuenta puede iniciar sesión con correo y contraseña (y
   /// por tanto cambiarla). Se consulta a Firebase Auth, no al perfil.
@@ -62,12 +75,43 @@ class AuthProvider extends ChangeNotifier {
   String? get uid => _user?.uid;
   String get displayName => _profile?.name ?? _user?.displayName ?? 'Usuario';
 
+  /// `true` si la cuenta tiene un teléfono verificado por SMS (proveedor
+  /// `phone` vinculado). Se consulta a Firebase Auth, no al perfil.
+  bool get isPhoneVerified {
+    final current = _user;
+    if (current == null) return false;
+    if (_phoneLinkedUid == current.uid) return true;
+    if ((current.phoneNumber ?? '').isNotEmpty) return true;
+    return current.providerData.any((p) => p.providerId == 'phone');
+  }
+
+  /// Si esta cuenta debe verificar su teléfono además del correo. Solo se
+  /// exige a los registros con correo que guardaron un teléfono (las cuentas
+  /// antiguas no tienen y las de Google ya vienen verificadas) y nunca en
+  /// plataformas sin verificación por SMS, como Windows.
+  bool get requiresPhoneVerification =>
+      AuthService.phoneSupported &&
+      _profile?.provider == 'email' &&
+      (_profile?.phone ?? '').isNotEmpty;
+
+  /// Cuenta verificada: correo y, si se exige, también el teléfono.
+  bool get isAccountVerified =>
+      isEmailVerified && (!requiresPhoneVerification || isPhoneVerified);
+
   /// `true` si el usuario con sesión se registró con correo y todavía no
   /// creó su contraseña definitiva. El router lo retiene en `/login`, donde
   /// se muestra el modal "Crear contraseña".
   bool get needsPasswordSetup {
     final current = _user;
     if (current == null || _passwordConfirmed) return false;
+    // Sin correo verificado nunca se pide la contraseña: durante el registro
+    // el Login sigue montado bajo el modal "Crear cuenta" y, sin esta
+    // condición, abría "Crear contraseña" (que afirma que el correo ya está
+    // verificado) antes de que el usuario abriera el enlace. La contraseña
+    // quedaba creada, pero el inicio de sesión rebotaba por no verificado.
+    if (!isEmailVerified) return false;
+    // Lo mismo con el teléfono: primero se verifican ambos.
+    if (requiresPhoneVerification && !isPhoneVerified) return false;
     return _setupUid == current.uid || (_profile?.passwordPending ?? false);
   }
 
@@ -112,10 +156,12 @@ class AuthProvider extends ChangeNotifier {
   Future<RegisterResult> register({
     required String name,
     required String email,
+    String? phone,
     String? birthDate,
     String? goal,
     String? level,
   }) async {
+    final safePhone = Validators.normalizePhone(phone);
     // Se activa antes de crear la cuenta: `authStateChanges` notifica al
     // router en cuanto Firebase crea el usuario y, sin esta marca, la
     // pantalla de registro se destruía antes de terminar su flujo.
@@ -143,6 +189,7 @@ class AuthProvider extends ChangeNotifier {
           uid: result.user.uid,
           name: name.trim(),
           email: email.trim(),
+          phone: safePhone.isEmpty ? null : safePhone,
           birthDate: birthDate,
           goal: goal,
           level: level,
@@ -300,13 +347,18 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<bool> checkEmailVerification() async {
-    final user = await _authService.reloadUser();
+    final (:user, :emailVerified) = await _authService
+        .reloadEmailVerification();
     // `reload()` crea un `User` nuevo y solo lo emite por `userChanges()`,
     // no por `authStateChanges()`. Sin esta asignación `_user` conservaba
     // `emailVerified == false` y el router devolvía al usuario a
     // `/verify-email` aunque ya hubiera verificado su correo.
     _user = user;
-    if (user.emailVerified) {
+    // Si solo lo confirmó el token (el `User` sigue desactualizado), se
+    // recuerda para este usuario: el router y el resto de la app lo leen
+    // con `isEmailVerified`.
+    if (emailVerified && !user.emailVerified) _emailVerifiedUid = user.uid;
+    if (emailVerified) {
       final userId = uid;
       if (userId != null) {
         // La verificación la decide Firebase Auth: si falla esta copia en
@@ -319,7 +371,67 @@ class AuthProvider extends ChangeNotifier {
       }
     }
     await refreshProfile();
-    return user.emailVerified;
+    return emailVerified;
+  }
+
+  /// Envía el código SMS para verificar [phone] y vincularlo a la cuenta.
+  /// Si el número cambió respecto al del perfil, se guarda el nuevo.
+  Future<PhoneCodeRequest> sendPhoneCode(
+    String phone, {
+    int? resendToken,
+  }) async {
+    final safePhone = Validators.normalizePhone(phone);
+    final userId = uid;
+    if (userId != null && safePhone != _profile?.phone) {
+      await _firestore.updateUserProfile(userId, {'phone': safePhone});
+      _profile = _profile?.copyWith(phone: safePhone);
+    }
+    final request = await _authService.startPhoneLink(
+      safePhone,
+      resendToken: resendToken,
+    );
+    if (request.autoVerified) await _markPhoneVerified(safePhone);
+    return request;
+  }
+
+  /// Confirma el código SMS. Al terminar notifica, y el router lleva al
+  /// usuario al paso siguiente si el correo ya estaba verificado.
+  Future<void> confirmPhoneCode({
+    String? verificationId,
+    required String smsCode,
+  }) async {
+    await _authService.confirmPhoneLink(
+      verificationId: verificationId,
+      smsCode: smsCode.trim(),
+    );
+    await _markPhoneVerified(_profile?.phone);
+  }
+
+  Future<void> _markPhoneVerified(String? phone) async {
+    final userId = uid;
+    if (userId == null) return;
+    _phoneLinkedUid = userId;
+    try {
+      // Igual que con el correo: `reload()` no emite por
+      // `authStateChanges()`, así que se reasigna `_user` a mano.
+      _user = await _authService.reloadUser();
+    } catch (error) {
+      debugPrint('No se pudo recargar el usuario: $error');
+    }
+    final verifiedPhone = (_user?.phoneNumber ?? '').isNotEmpty
+        ? _user!.phoneNumber
+        : phone;
+    // La verificación la decide Firebase Auth: si falla esta copia en
+    // Firestore no debe impedir que el usuario continúe.
+    try {
+      await _firestore.updateUserProfile(userId, {
+        'phone': verifiedPhone,
+        'phoneVerified': true,
+      });
+    } catch (error) {
+      debugPrint('No se pudo marcar phoneVerified en Firestore: $error');
+    }
+    await refreshProfile();
   }
 
   Future<void> changePassword({
@@ -379,6 +491,7 @@ class AuthProvider extends ChangeNotifier {
     // La clave interna del registro se descarta al salir.
     _setupUid = null;
     _setupSecret = null;
+    _phoneLinkedUid = null;
     await _authService.logout();
     _passwordConfirmed = false;
   }

@@ -8,6 +8,7 @@ import '../../core/utils/formatters.dart';
 import '../../models/exercise_model.dart';
 import '../../providers/progress_provider.dart';
 import '../../services/firestore_service.dart';
+import '../../widgets/train_section_tabs.dart';
 import '../../widgets/app_feedback.dart';
 import '../../widgets/confirmation_dialog.dart';
 import '../../widgets/empty_state.dart';
@@ -107,6 +108,14 @@ class _ExercisesScreenState extends State<ExercisesScreen> {
     await _load();
   }
 
+  /// Abre el catálogo de wger; al volver se recargan los ejercicios por si
+  /// se añadió alguno.
+  Future<void> _openCatalog() async {
+    await context.push('/ejercicio/catalogo');
+    if (!mounted) return;
+    await _load();
+  }
+
   Future<void> _openEdit(ExerciseModel exercise) async {
     await context.push('/ejercicio/crear', extra: exercise);
     if (!mounted) return;
@@ -150,7 +159,15 @@ class _ExercisesScreenState extends State<ExercisesScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Mis ejercicios'),
+        // Se vuelve a Rutinas con el selector de la pestaña Entrenar.
+        automaticallyImplyLeading: false,
         actions: [
+          // Catálogo público de wger (API REST).
+          IconButton(
+            tooltip: 'Explorar catálogo',
+            onPressed: _openCatalog,
+            icon: const Icon(Icons.travel_explore_rounded),
+          ),
           IconButton(
             tooltip: 'Nuevo ejercicio',
             onPressed: _openCreate,
@@ -168,7 +185,13 @@ class _ExercisesScreenState extends State<ExercisesScreen> {
               icon: const Icon(Icons.add_rounded),
               label: const Text('Nuevo'),
             ),
-      body: _buildBody(),
+      // Selector "Rutinas | Ejercicios" de la pestaña Entrenar.
+      body: Column(
+        children: [
+          const TrainSectionTabs(current: TrainSection.ejercicios),
+          Expanded(child: _buildBody()),
+        ],
+      ),
     );
   }
 

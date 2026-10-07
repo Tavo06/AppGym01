@@ -16,7 +16,7 @@ class WorkoutCard extends StatelessWidget {
     return Card(
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(AppRadii.card),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Row(
@@ -65,10 +65,10 @@ class WorkoutCard extends StatelessWidget {
                 children: [
                   Text(
                     Formatters.formatVolume(session.totalVolume),
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w800,
-                      color: AppColors.primary,
+                      color: context.palette.primaryText,
                     ),
                   ),
                   const SizedBox(height: 3),

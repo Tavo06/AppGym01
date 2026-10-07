@@ -3,12 +3,15 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/constants/app_constants.dart';
+import '../../core/routes/app_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
 import '../../models/user_model.dart';
+import '../../providers/achievement_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/progress_provider.dart';
 import '../../providers/theme_provider.dart';
+import '../../widgets/achievement_widgets.dart';
 import '../../widgets/app_feedback.dart';
 import '../../widgets/confirmation_dialog.dart';
 import '../../widgets/progress_card.dart';
@@ -153,6 +156,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ],
                     ),
                   const SizedBox(height: 20),
+                  const SectionHeader(title: 'Logros'),
+                  const _AchievementsCard(),
+                  const SizedBox(height: 20),
                   const SectionHeader(title: 'Cuenta'),
                   Card(
                     clipBehavior: Clip.antiAlias,
@@ -259,10 +265,10 @@ class _ProfileHeader extends StatelessWidget {
       backgroundColor: palette.primarySoft,
       child: Text(
         initial,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 30,
           fontWeight: FontWeight.w800,
-          color: AppColors.primary,
+          color: context.palette.primaryText,
         ),
       ),
     );
@@ -382,6 +388,57 @@ class _Chip extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Acceso a Mis logros con el total conseguido y los más recientes.
+class _AchievementsCard extends StatelessWidget {
+  const _AchievementsCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final achievements = context.watch<AchievementProvider>();
+    final latest = achievements.unlockedDefinitions.take(5).toList();
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => context.push(AppRoutes.logros),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _ProfileAction(
+              icon: Icons.emoji_events_rounded,
+              title: 'Mis logros',
+              color: AppColors.amber,
+              subtitle:
+                  '${achievements.unlockedCount} de ${achievements.total} '
+                  'conseguidos',
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => context.push(AppRoutes.logros),
+            ),
+            if (latest.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                child: Wrap(
+                  spacing: 10,
+                  runSpacing: 8,
+                  children: [
+                    for (final definition in latest)
+                      Tooltip(
+                        message: definition.title,
+                        child: AchievementBadge(
+                          definition: definition,
+                          unlocked: true,
+                          size: 38,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -523,6 +580,16 @@ class _SettingsSheet extends StatelessWidget {
             title: 'Correo verificado',
             value: auth.isEmailVerified ? 'Sí' : 'No',
           ),
+          if ((auth.profile?.phone ?? '').isNotEmpty || auth.isPhoneVerified)
+            _SettingsRow(
+              icon: auth.isPhoneVerified
+                  ? Icons.phonelink_lock_rounded
+                  : Icons.phone_iphone_rounded,
+              title: auth.isPhoneVerified
+                  ? 'Teléfono verificado'
+                  : 'Teléfono (sin verificar)',
+              value: auth.user?.phoneNumber ?? auth.profile?.phone ?? '—',
+            ),
           if (user?.metadata.lastSignInTime != null)
             _SettingsRow(
               icon: Icons.schedule_rounded,

@@ -143,10 +143,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       backgroundColor: palette.primarySoft,
                       child: Text(
                         name.isEmpty ? '?' : name[0].toUpperCase(),
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 26,
                           fontWeight: FontWeight.w800,
-                          color: AppColors.primary,
+                          color: context.palette.primaryText,
                         ),
                       ),
                     ),

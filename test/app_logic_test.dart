@@ -164,6 +164,26 @@ void main() {
     test('perfiles antiguos sin el campo no quedan pendientes', () {
       final user = UserModel.fromMap('u1', {'name': 'Ana'});
       expect(user.passwordPending, isFalse);
+      expect(user.phone, isNull);
+      expect(user.phoneVerified, isFalse);
+    });
+
+    test('el teléfono y su verificación se guardan y se leen', () {
+      final user = UserModel(
+        uid: 'u1',
+        name: 'Ana',
+        email: 'ana@x.com',
+        phone: '+51987654321',
+      );
+      final map = user.toMap();
+      expect(map['phone'], '+51987654321');
+      expect(map['phoneVerified'], isFalse);
+      final verified = UserModel.fromMap(
+        'u1',
+        map,
+      ).copyWith(phoneVerified: true);
+      expect(verified.phone, '+51987654321');
+      expect(verified.phoneVerified, isTrue);
     });
   });
 

@@ -9,10 +9,14 @@ class DayMarkers {
     this.trained = false,
     this.scheduled = 0,
     this.scheduledDone = 0,
+    this.nutrition = false,
   });
 
   /// Hubo al menos una sesión ese día.
   final bool trained;
+
+  /// Se registró comida o se cumplió la meta de agua ese día.
+  final bool nutrition;
 
   /// Entrenamientos programados ese día y cuántos se completaron.
   final int scheduled;
@@ -149,10 +153,17 @@ class MonthCalendar extends StatelessWidget {
           spacing: 16,
           runSpacing: 6,
           alignment: WrapAlignment.center,
-          children: const [
-            _Legend(color: AppColors.primary, label: 'Entrenado'),
-            _Legend(color: AppColors.teal, label: 'Programado', ring: true),
-            _Legend(color: AppColors.success, label: 'Completado'),
+          children: [
+            const _Legend(color: AppColors.primary, label: 'Entrenado'),
+            const _Legend(
+              color: AppColors.teal,
+              label: 'Programado',
+              ring: true,
+            ),
+            const _Legend(color: AppColors.success, label: 'Completado'),
+            // Solo si el usuario usa Alimentación.
+            if (markers.values.any((m) => m.nutrition))
+              const _Legend(color: AppColors.violet, label: 'Alimentación'),
           ],
         ),
       ],
@@ -217,29 +228,40 @@ class _DayCell extends StatelessWidget {
                 const SizedBox(height: 3),
                 SizedBox(
                   height: 7,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      if (markers.trained)
-                        _Dot(
-                          color: selected
-                              ? AppColors.onPrimary
-                              : AppColors.primary,
-                        ),
-                      if (markers.scheduledDone > 0)
-                        _Dot(
-                          color: selected
-                              ? AppColors.onPrimary
-                              : AppColors.success,
-                        ),
-                      if (markers.hasPending)
-                        _Dot(
-                          color: selected
-                              ? AppColors.onPrimary
-                              : AppColors.teal,
-                          ring: true,
-                        ),
-                    ],
+                  // Con cuatro marcas la fila puede superar el ancho de la
+                  // celda en móviles estrechos: se reduce en vez de desbordar.
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        if (markers.trained)
+                          _Dot(
+                            color: selected
+                                ? AppColors.onPrimary
+                                : AppColors.primary,
+                          ),
+                        if (markers.scheduledDone > 0)
+                          _Dot(
+                            color: selected
+                                ? AppColors.onPrimary
+                                : AppColors.success,
+                          ),
+                        if (markers.hasPending)
+                          _Dot(
+                            color: selected
+                                ? AppColors.onPrimary
+                                : AppColors.teal,
+                            ring: true,
+                          ),
+                        if (markers.nutrition)
+                          _Dot(
+                            color: selected
+                                ? AppColors.onPrimary
+                                : AppColors.violet,
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               ],
